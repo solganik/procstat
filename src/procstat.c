@@ -44,6 +44,13 @@ struct procstat_directory {
 	struct list_head       children;
 };
 
+
+struct procstat_file {
+	struct procstat_item	base;
+	void  	    		*private;
+	procstats_formatter  	writer;
+};
+
 struct procstat_context {
 	struct procstat_directory root;
 	char *mountpoint;
@@ -61,6 +68,11 @@ static uint32_t string_hash(const char *string)
 	for (i = (unsigned char*)string; *i; ++i)
 	hash = 31 * hash + *i;
 	return hash;
+}
+
+static struct procstat_file* fuse_inode_to_file(fuse_ino_t inode)
+{
+	return (struct procstat_file*)(inode);
 }
 
 static struct procstat_item *fuse_inode_to_item(struct procstat_context *context, fuse_ino_t inode)
@@ -302,6 +314,76 @@ done:
 	return;
 }
 
+static void fuse_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
+{
+	struct procstat_context *context = request_context(req);
+	struct procstat_file *file;
+
+	pthread_mutex_lock(&context->global_lock);
+	file = fuse_inode_to_file(ino);
+
+	if (!item_registered(&file->base)) {
+		fuse_reply_err(req, ENOENT);
+		pthread_mutex_unlock(&context->global_lock);
+		return;
+	}
+
+	pthread_mutex_unlock(&context->global_lock);
+
+	/* we dont know size of file in advance so use directio*/
+	fi->direct_io = true;
+	fuse_reply_open(req, fi);
+}
+
+
+#define READ_BUFFER_SIZE 100
+static void fuse_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi)
+{
+	char buffer[READ_BUFFER_SIZE];
+	struct procstat_file *file = fuse_inode_to_file(ino);
+	int len_to_read = min((int)size, READ_BUFFER_SIZE);
+	int bytes_written;
+
+	bytes_written = file->writer(file->private, buffer, len_to_read, off);
+	if (bytes_written < 0) {
+		fuse_reply_err(req, EIO);
+		return;
+	}
+
+	/* Currently only support stats to 100 bytes .. FIXME: support longer stats */
+	fuse_reply_buf(req, (char *)buffer + off, min_t(int, bytes_written - off, size));
+}
+
+static void init_item(struct procstat_item *item, const char *name)
+{
+	size_t name_len = strlen(name);
+
+	item->name_hash = string_hash(name);
+	if (name_len < DNAME_INLINE_LEN)
+		strcpy(item->iname, name);
+	else {
+		item->name.zero = 0;
+		item->name.buffer = strdup(name);
+	}
+	INIT_LIST_HEAD(&item->entry);
+}
+
+static struct procstat_file *allocate_file_item(const char *name,
+					   	void *priv,
+						procstats_formatter callback)
+{
+	struct procstat_file *file;
+
+	file = calloc(1, sizeof(*file));
+	if (!file)
+		return NULL;
+
+	init_item(&file->base, name);
+	file->private = priv;
+	file->writer = callback;
+	return file;
+}
+
 static int register_item(struct procstat_context *context,
 			 struct procstat_item *item,
 			 struct procstat_directory *parent)
@@ -321,20 +403,6 @@ static int register_item(struct procstat_context *context,
 	item->refcnt = 1;
 	pthread_mutex_unlock(&context->global_lock);
 	return 0;
-}
-
-static void init_item(struct procstat_item *item, const char *name)
-{
-	size_t name_len = strlen(name);
-
-	item->name_hash = string_hash(name);
-	if (name_len < DNAME_INLINE_LEN)
-		strcpy(item->iname, name);
-	else {
-		item->name.zero = 0;
-		item->name.buffer = strdup(name);
-	}
-	INIT_LIST_HEAD(&item->entry);
 }
 
 static int init_directory(struct procstat_context *context,
@@ -386,6 +454,30 @@ static struct procstat_item *parent_or_root(struct procstat_context *context, st
 	else if (item_type_directory(parent))
 		return parent;
 	return NULL;
+}
+
+static struct procstat_file *create_file(struct procstat_context *context,
+					 struct procstat_directory *parent,
+					 const char *name, void *item,
+					 procstats_formatter callback)
+{
+	struct procstat_file *file;
+	int error;
+
+	file = allocate_file_item(name, item, callback);
+	if (!file) {
+		errno = ENOMEM;
+		return NULL;
+	}
+
+	error = register_item(context,&file->base, parent);
+	if (error) {
+		errno = error;
+		free_item(&file->base);
+		return NULL;
+
+	}
+	return file;
 }
 
 struct procstat_item *procstat_create_directory(struct procstat_context *context,
@@ -466,6 +558,38 @@ int procstat_remove_by_name(struct procstat_context *context,
 	return 0;
 }
 
+int procstat_create_simple(struct procstat_context *context,
+			   struct procstat_item *parent,
+			   struct procstat_simple_handle *descriptors,
+			   size_t descriptors_size)
+{
+	int i;
+
+	parent = parent_or_root(context, parent);
+	if (!parent) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	for (i = 0; i < descriptors_size; ++i) {
+		struct procstat_file *file;
+		struct procstat_simple_handle *descriptor = &descriptors[i];
+
+		file = create_file(context, (struct procstat_directory *)parent,
+				   descriptor->name, descriptor->object, descriptor->fmt);
+		if (!file) {
+			--i;
+			goto error_release;
+		}
+	}
+	return 0;
+error_release:
+
+	for (; i >= 0; --i)
+		procstat_remove_by_name(context, parent, descriptors[i].name);
+	return -1;
+}
+
 struct procstat_item *procstat_root(struct procstat_context *context)
 {
 	assert(context);
@@ -473,11 +597,13 @@ struct procstat_item *procstat_root(struct procstat_context *context)
 }
 
 static struct fuse_lowlevel_ops fops = {
+	.read = fuse_read,
 	.forget = fuse_forget,
 	.lookup = fuse_lookup,
 	.getattr = fuse_getattr,
 	.opendir = fuse_opendir,
 	.readdir = fuse_readdir,
+	.open = fuse_open,
 };
 
 #define ROOT_DIR_NAME "."

@@ -11,6 +11,28 @@ struct procstat_context;
 struct procstat_item;
 
 /**
+ * @brief: stats formatter method
+ * @param object registered with statistics
+ * @param buffer to format object to
+ * @param lenght of buffer
+ * @param offset to return from beginning of buffer. This can be ignored in case statistics string
+ * is large > 4K
+ */
+typedef ssize_t (*procstats_formatter)(void *object, char *buffer, size_t length, off_t offset);
+
+/**
+ * @brief registration parameter for simple value statistics
+ * @name of statistics
+ * @bject to be passed to the formatter.
+ * @fmt data formatter
+ */
+struct procstat_simple_handle {
+	const char 	    *name;
+	void 	 	    *object;
+	procstats_formatter fmt;
+};
+
+/**
  * @brief create statstics context and mount it on running machine under @mountpoint.
  * @mountpoint root directory for statistics will be created in case it does not exists.
  * @return context to be used for all statistics operations. or NULL in case of error. errno will be
@@ -45,6 +67,15 @@ void procstat_loop(struct procstat_context *context);
 struct procstat_item *procstat_create_directory(struct procstat_context *context,
 					  	struct procstat_item *parent,
 						const char *name);
+
+/**
+ * @brief creates counter, which will be exposed as @name under @parent dictory.
+ * @return 0 on success, -1  in case of failure and errno will be set accordingly
+ */
+int procstat_create_simple(struct procstat_context *context,
+			   struct procstat_item *parent,
+			   struct procstat_simple_handle *descriptors,
+			   size_t descriptors_len);
 
 /**
  * @brief removes statistics item previosly created with any of creation methods
