@@ -173,6 +173,50 @@ int procstat_create_start_end(struct procstat_context 	       *context,
 	(struct procstat_start_end_handle){name, &start_end.start, &start_end.end, procstat_format_u64_decimal}
 
 /**
+ * @brief registration parameter for series statistics. statistical analysis will be performed on values
+ * submitted as series point. mean and variance will be calculated upon even point submittion
+ * stddev and average are additionally exposed and calculated upen request.
+ * @name of statistics
+ * @object to be passed to the formatter.
+ * @fmt data formatter
+ */
+struct procstat_series_u64_handle {
+	const char *name;
+	struct procstat_series_u64 *series;
+};
+
+
+struct procstat_series_u64 {
+	uint64_t sum;
+	uint64_t count;
+	uint64_t min;
+	uint64_t max;
+	uint64_t last;
+	uint64_t mean;
+	uint64_t aggregated_variance;
+};
+
+/**
+ * @brief create series statistics.
+ */
+int procstat_create_u64_series(struct procstat_context *context, struct procstat_item *parent,
+			       const char *name, struct procstat_series_u64 *series);
+
+
+/**
+ * @brief create multiple series statstics
+ */
+int procstat_create_multiple_u64_series(struct procstat_context *context,
+					struct procstat_item *parent,
+					struct procstat_series_u64_handle *descriptors,
+					size_t series_len);
+
+/**
+ * @brief add points to series statistics
+ */
+void procstat_u64_series_add_point(struct procstat_series_u64 *series, uint64_t value);
+
+/**
  * @brief removes statistics item previosly created with any of creation methods
  */
 void procstat_remove(struct procstat_context *context, struct procstat_item *item);

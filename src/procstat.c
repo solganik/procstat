@@ -5,6 +5,8 @@
 #include "procstat.h"
 #include "list.h"
 #include <errno.h>
+#include <limits.h>
+#include <math.h>
 #include <stdlib.h>
 #include <pthread.h>
 #include <string.h>
@@ -58,6 +60,11 @@ struct procstat_context {
 	gid_t	gid;
 	uid_t   uid;
 	pthread_mutex_t global_lock;
+};
+
+struct procstat_series {
+	struct procstat_directory root;
+	void  	    		  *private;
 };
 
 static uint32_t string_hash(const char *string)
@@ -456,6 +463,49 @@ static struct procstat_item *parent_or_root(struct procstat_context *context, st
 	return NULL;
 }
 
+static ssize_t write_u64_average(void *data, char *buffer, size_t len, off_t offset)
+{
+	struct procstat_series_u64 *series = (struct procstat_series_u64 *)data;
+
+	if (!series->count)
+		return snprintf(buffer, len, "nan");
+
+	return snprintf(buffer, len, "%lu\n", series->sum / series->count);
+}
+
+static ssize_t write_series_min(void *data, char *buffer, size_t len, off_t offset)
+{
+	struct procstat_series_u64 *series = (struct procstat_series_u64 *)data;
+
+	if (!series->count)
+		return snprintf(buffer, len, "nan");
+
+	return snprintf(buffer, len, "%lu\n", series->min);
+}
+
+static ssize_t write_series_max(void *data, char *buffer, size_t len, off_t offset)
+{
+	struct procstat_series_u64 *series = (struct procstat_series_u64 *)data;
+
+	if (!series->count)
+		return snprintf(buffer, len, "nan");
+
+	return snprintf(buffer, len, "%lu\n", series->max);
+}
+
+
+static ssize_t write_series_stddev(void *data, char *buffer, size_t len, off_t offset)
+{
+	struct procstat_series_u64 *series = (struct procstat_series_u64 *)data;
+	uint64_t variance;
+
+	if (series->count < 2)
+		return snprintf(buffer, len, "nan");
+
+	variance = series->aggregated_variance / (series->count - 1);
+	return snprintf(buffer, len, "%lu\n", (uint64_t)sqrt(variance));
+}
+
 static struct procstat_file *create_file(struct procstat_context *context,
 					 struct procstat_directory *parent,
 					 const char *name, void *item,
@@ -586,6 +636,108 @@ int procstat_create_simple(struct procstat_context *context,
 error_release:
 
 	for (; i >= 0; --i)
+		procstat_remove_by_name(context, parent, descriptors[i].name);
+	return -1;
+}
+
+void procstat_u64_series_add_point(struct procstat_series_u64 *series, uint64_t value)
+{
+	int64_t delta;
+	int64_t delta2;
+	int64_t avg_delta;
+
+	if (value < series->min)
+		series->min = value;
+	if (value > series->max)
+		series->max = value;
+	++series->count;
+	series->last = value;
+	series->sum += value;
+
+	/* Calculate mean and estimated variance according to Welford algorithm
+	 * https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance*/
+	delta = (int64_t)value - series->mean;
+	avg_delta = delta / (int64_t)series->count;
+	series->mean = (int64_t)series->mean + avg_delta;
+	delta2 = (int64_t)value - series->mean;
+	series->aggregated_variance += delta * delta2;
+}
+
+int procstat_create_u64_series(struct procstat_context *context, struct procstat_item *parent,
+			       const char *name, struct procstat_series_u64 *series)
+{
+	struct procstat_series *series_stat;
+	int error;
+
+	struct procstat_simple_handle descriptors[] = {
+		{"sum",    &series->sum, procstat_format_u64_decimal},
+		{"count",  &series->count, procstat_format_u64_decimal},
+		{"min",    series, write_series_min},
+		{"max",    series, write_series_max},
+		{"last",   &series->last, procstat_format_u64_decimal},
+		{"avg",    series, write_u64_average},
+		{"mean",   &series->mean, procstat_format_u64_decimal},
+		{"stddev", series, write_series_stddev},
+	};
+
+	parent = parent_or_root(context, parent);
+	if (!parent) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	series_stat = calloc(1, sizeof(*series_stat));
+	if (!series_stat) {
+		errno = ENOMEM;
+		return -1;
+	}
+
+	series->min = ULLONG_MAX;
+	error = init_directory(context, &series_stat->root,
+			       name, (struct procstat_directory *)parent);
+	if (error) {
+		free_item(&series_stat->root.base);
+		errno = error;
+		return -1;
+	}
+
+
+	error = procstat_create_simple(context, &series_stat->root.base, descriptors, ARRAY_SIZE(descriptors));
+	if (error) {
+		procstat_remove(context, parent);
+		errno = error;
+		return -1;
+	}
+	return 0;
+}
+
+int procstat_create_multiple_u64_series(struct procstat_context *context,
+					struct procstat_item *parent,
+					struct procstat_series_u64_handle *descriptors,
+					size_t series_len)
+{
+	int i;
+
+	parent = parent_or_root(context, parent);
+	if (!parent) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	for (i = 0; i < series_len; ++i) {
+		int error;
+
+		error = procstat_create_u64_series(context, parent,
+						   descriptors[i].name, descriptors[i].series);
+		if (error) {
+			errno = error;
+			--i;
+			goto error_release;
+		}
+	}
+	return 0;
+error_release:
+	for (;i >= 0; --i)
 		procstat_remove_by_name(context, parent, descriptors[i].name);
 	return -1;
 }
