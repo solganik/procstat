@@ -123,6 +123,56 @@ static inline ssize_t procstat_format_ ## __type ##_## name(void *object, char *
 }\
 
 /**
+ * @brief registration parameter for start end statistics. This is equivalent to creating a directory
+ * with @name and registering start and end files bounded to @start and @end
+ * @name of statistics
+ * @start object to be exposed as "start" filename under @name statistic
+ * @end object to be exposed as "end" filename under @name statistic
+ * @fmt data formatter
+ */
+struct procstat_start_end_handle {
+	char *name;
+	void *start;
+	void *end;
+	procstats_formatter fmt;
+};
+
+
+struct procstat_start_end_u32 {
+	uint32_t start;
+	uint32_t end;
+};
+
+struct procstat_start_end_u64 {
+	uint64_t start;
+	uint64_t end;
+};
+
+/**
+ * @brief create start end statistics
+ * @context of the stats
+ * @parent under which to create start end statistics
+ * @descriptors array of descriptors for start end statistics
+ * @descriptors_len of the array
+ */
+int procstat_create_start_end(struct procstat_context 	       *context,
+			      struct procstat_item 	       *parent,
+			      struct procstat_start_end_handle *descriptors,
+			      size_t 				descriptors_len);
+
+/**
+ * @brief shortcut to create handle for u32 start end stat
+ */
+#define procstat_start_end_u32_handle(name, start_end)\
+	(struct procstat_start_end_handle){name, &start_end.start, &start_end.end, procstat_format_u32_decimal}
+
+/**
+ * @brief shortcut to create handle for u64 start end stat
+ */
+#define procstat_start_end_u64_handle(name, start_end)\
+	(struct procstat_start_end_handle){name, &start_end.start, &start_end.end, procstat_format_u64_decimal}
+
+/**
  * @brief removes statistics item previosly created with any of creation methods
  */
 void procstat_remove(struct procstat_context *context, struct procstat_item *item);

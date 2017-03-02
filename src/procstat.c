@@ -590,6 +590,47 @@ error_release:
 	return -1;
 }
 
+int procstat_create_start_end(struct procstat_context *context,
+			      struct procstat_item *parent,
+			      struct procstat_start_end_handle *descriptors,
+			      size_t descriptors_size)
+{
+	int i;
+
+	parent = parent_or_root(context, parent);
+	if (!parent) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	for (i = 0; i < descriptors_size; ++i) {
+		struct procstat_start_end_handle *descriptor = &descriptors[i];
+		struct procstat_directory *directory;
+		struct procstat_file *file;
+
+		directory = (struct procstat_directory *)procstat_create_directory(context, parent,
+										   descriptors[i].name);
+		if (!directory) {
+			--i;
+			goto error_release;
+		}
+
+		file = create_file(context, directory, "start", descriptor->start, descriptor->fmt);
+		if (!file)
+			goto error_release;
+
+		file = create_file(context, directory, "end", descriptor->end, descriptor->fmt);
+		if (!file) {
+			goto error_release;
+		}
+	}
+	return 0;
+error_release:
+	for (; i >= 0; --i)
+		procstat_remove_by_name(context, parent, descriptors[i].name);
+	return -1;
+}
+
 struct procstat_item *procstat_root(struct procstat_context *context)
 {
 	assert(context);
