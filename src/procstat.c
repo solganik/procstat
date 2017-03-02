@@ -78,6 +78,30 @@ static const char *procstat_item_name(struct procstat_item *item)
 	return item->name.buffer;
 }
 
+static bool item_type_directory(struct procstat_item *item)
+{
+	return (item->flags & STATS_ENTRY_FLAG_DIR);
+}
+
+#define INODE_BLK_SIZE 4096
+static void fill_item_stats(struct procstat_context *context, struct procstat_item *item, struct stat *stat)
+{
+	stat->st_uid = context->uid;
+	stat->st_gid = context->gid;
+	stat->st_ino = (__ino_t)item;
+
+	if (item_type_directory(item)) {
+		stat->st_mode = S_IFDIR | 0755;
+		stat->st_nlink = root_directory(context, (struct procstat_directory *)item) ? 2 : 1;
+		return;
+	}
+	stat->st_mode = S_IFREG | 0444;
+	stat->st_nlink = 1;
+	stat->st_size = 0;
+	stat->st_blocks = 0;
+	stat->st_blksize = INODE_BLK_SIZE;
+}
+
 static struct procstat_item *lookup_item_locked(struct procstat_directory *parent,
 						  const char *name,
 						  uint32_t name_hash)
