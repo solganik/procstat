@@ -78,6 +78,10 @@ static struct procstat_context *request_context(fuse_req_t req)
 	return (struct procstat_context *)fuse_req_userdata(req);
 }
 
+static bool root_directory(struct procstat_context *context, struct procstat_directory *directory)
+{
+	return &context->root == directory;
+}
 
 static bool stats_item_short_name(struct procstat_item *item)
 {
@@ -117,6 +121,12 @@ static void free_item(struct procstat_item *item)
 
 	free(item);
 }
+
+static void free_directory(struct procstat_directory *directory)
+{
+	free_item(&directory->base);
+}
+
 
 static void fuse_forget(fuse_req_t req, fuse_ino_t ino, unsigned long nlookup)
 {
@@ -344,6 +354,124 @@ static int init_directory(struct procstat_context *context,
 	return 0;
 }
 
+static void item_put_locked(struct procstat_item *item);
+static void item_put_children_locked(struct procstat_directory *directory)
+{
+	struct procstat_item *iter, *n;
+	list_for_each_entry_safe(iter, n, &directory->children, entry) {
+		iter->parent = NULL;
+		list_del_init(&iter->entry);
+		item_put_locked(iter);
+	}
+}
+
+static void item_put_locked(struct procstat_item *item)
+{
+	assert(item->refcnt);
+
+	if (--item->refcnt)
+		return;
+
+	item->flags &= ~STATS_ENTRY_FLAG_REGISTERED;
+	if (item_type_directory(item))
+		item_put_children_locked((struct procstat_directory *)item);
+
+	free_item(item);
+}
+
+static struct procstat_item *parent_or_root(struct procstat_context *context, struct procstat_item *parent)
+{
+	if (!parent)
+		return &context->root.base;
+	else if (item_type_directory(parent))
+		return parent;
+	return NULL;
+}
+
+struct procstat_item *procstat_create_directory(struct procstat_context *context,
+					   	struct procstat_item *parent,
+						const char *name)
+{
+	struct procstat_directory *new_directory;
+	int error;
+
+	parent = parent_or_root(context, parent);
+	if (!parent) {
+		errno = EINVAL;
+		return NULL;
+	}
+
+	new_directory = calloc(1, sizeof(*new_directory));
+	if (!new_directory) {
+		errno = ENOMEM;
+		return NULL;
+	}
+
+	error = init_directory(context, new_directory, name, (struct procstat_directory *)parent);
+	if (error) {
+		free_directory(new_directory);
+		errno = error;
+		return NULL;
+	}
+
+	return &new_directory->base;
+}
+
+void procstat_remove(struct procstat_context *context, struct procstat_item *item)
+{
+	struct procstat_directory *directory;
+
+	assert(context);
+	assert(item);
+
+	pthread_mutex_lock(&context->global_lock);
+	if (!item_type_directory(item))
+		goto remove_item;
+
+	directory = (struct procstat_directory *)item;
+	if (root_directory(context, directory)) {
+		item_put_children_locked(directory);
+		goto done;
+	}
+
+remove_item:
+	item->flags &= ~STATS_ENTRY_FLAG_REGISTERED;
+	item_put_locked(item);
+done:
+	pthread_mutex_unlock(&context->global_lock);
+}
+
+int procstat_remove_by_name(struct procstat_context *context,
+			    struct procstat_item *parent,
+			    const char *name)
+{
+	struct procstat_item *item;
+
+	parent = parent_or_root(context, parent);
+	if (!parent) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	pthread_mutex_lock(&context->global_lock);
+	item = lookup_item_locked((struct procstat_directory *)parent,
+				  name, string_hash(name));
+	if (!item) {
+		pthread_mutex_unlock(&context->global_lock);
+		return ENOENT;
+	}
+	item->flags &= ~STATS_ENTRY_FLAG_REGISTERED;
+	item_put_locked(item);
+	pthread_mutex_unlock(&context->global_lock);
+	return 0;
+}
+
+struct procstat_item *procstat_root(struct procstat_context *context)
+{
+	assert(context);
+	return &context->root.base;
+}
+
 static struct fuse_lowlevel_ops fops = {
 	.forget = fuse_forget,
 	.lookup = fuse_lookup,
@@ -426,6 +554,7 @@ void procstat_destroy(struct procstat_context *context)
 		fuse_session_destroy(session);
 	}
 
+	item_put_children_locked(&context->root);
 	free(context->mountpoint);
 	pthread_mutex_unlock(&context->global_lock);
 	pthread_mutex_destroy(&context->global_lock);
