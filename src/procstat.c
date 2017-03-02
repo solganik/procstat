@@ -63,6 +63,22 @@ static uint32_t string_hash(const char *string)
 	return hash;
 }
 
+static struct procstat_item *fuse_inode_to_item(struct procstat_context *context, fuse_ino_t inode)
+{
+	return (inode == FUSE_ROOT_ID) ? &context->root.base : (struct procstat_item *)(inode);
+}
+
+static struct procstat_directory *fuse_inode_to_dir(struct procstat_context *context, fuse_ino_t inode)
+{
+	return (struct procstat_directory *)fuse_inode_to_item(context, inode);
+}
+
+static struct procstat_context *request_context(fuse_req_t req)
+{
+	return (struct procstat_context *)fuse_req_userdata(req);
+}
+
+
 static bool stats_item_short_name(struct procstat_item *item)
 {
 	/* file name cannot start with \0, so in case
@@ -78,9 +94,39 @@ static const char *procstat_item_name(struct procstat_item *item)
 	return item->name.buffer;
 }
 
+static bool item_registered(struct procstat_item *item)
+{
+	return item->flags & STATS_ENTRY_FLAG_REGISTERED;
+}
+
 static bool item_type_directory(struct procstat_item *item)
 {
 	return (item->flags & STATS_ENTRY_FLAG_DIR);
+}
+
+static void free_item(struct procstat_item *item)
+{
+	list_del(&item->entry);
+	if (item_type_directory(item)) {
+		struct procstat_directory *directory = (struct procstat_directory *)item;
+		assert(list_empty(&directory->children));
+	}
+
+	if (!stats_item_short_name(item))
+		free(item->name.buffer);
+
+	free(item);
+}
+
+static void fuse_forget(fuse_req_t req, fuse_ino_t ino, unsigned long nlookup)
+{
+	struct procstat_item *item = fuse_inode_to_item(request_context(req), ino);
+
+	assert(item->refcnt >= nlookup);
+	item->refcnt -= nlookup;
+	if (item->refcnt == 0)
+		free_item(item);
+	fuse_reply_none(req);
 }
 
 #define INODE_BLK_SIZE 4096
@@ -116,6 +162,32 @@ static struct procstat_item *lookup_item_locked(struct procstat_directory *paren
 	}
 
 	return NULL;
+}
+
+static void fuse_lookup(fuse_req_t req, fuse_ino_t parent_inode, const char *name)
+{
+	struct procstat_context *context = request_context(req);
+	static struct procstat_directory *parent;
+	struct procstat_item *item;
+	struct fuse_entry_param fuse_entry;
+
+	memset(&fuse_entry, 0, sizeof(fuse_entry));
+
+	pthread_mutex_lock(&context->global_lock);
+	parent = fuse_inode_to_dir(request_context(req), parent_inode);
+
+	item = lookup_item_locked(parent, name, string_hash(name));
+	if ((!item) || (!item_registered(item))) {
+		pthread_mutex_unlock(&context->global_lock);
+		fuse_reply_err(req, ENOENT);
+		return;
+	}
+	++item->refcnt;
+	pthread_mutex_unlock(&context->global_lock);
+
+	fuse_entry.ino = (uintptr_t)item;
+	fill_item_stats(context, item, &fuse_entry.attr);
+	fuse_reply_entry(req, &fuse_entry);
 }
 
 static int register_item(struct procstat_context *context,
@@ -171,6 +243,8 @@ static int init_directory(struct procstat_context *context,
 }
 
 static struct fuse_lowlevel_ops fops = {
+	.forget = fuse_forget,
+	.lookup = fuse_lookup
 };
 
 #define ROOT_DIR_NAME "."
