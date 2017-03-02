@@ -98,6 +98,17 @@ DEFINE_PROCSTAT_FORMATTER(u64, "0x%lx\n", address);
 DEFINE_PROCSTAT_FORMATTER(u32, "%u\n", decimal);
 DEFINE_PROCSTAT_FORMATTER(u32, "%x\n", hex);
 
+#define DEFINE_PROCSTAT_SIMPLE_ATTRIBUTE(__type)\
+static inline int procstat_create_ ## __type(struct procstat_context *context, struct procstat_item *parent, const char *name, __type *object)\
+{\
+	struct procstat_simple_handle descriptor = {name, object, procstat_format_ ## __type ## _decimal};\
+	\
+	return procstat_create_simple(context, parent, &descriptor, 1);\
+}\
+
+DEFINE_PROCSTAT_SIMPLE_ATTRIBUTE(u32);
+DEFINE_PROCSTAT_SIMPLE_ATTRIBUTE(u64);
+
 /**
  * @brief removes statistics item previosly created with any of creation methods
  */
