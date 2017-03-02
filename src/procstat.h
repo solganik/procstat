@@ -77,6 +77,27 @@ int procstat_create_simple(struct procstat_context *context,
 			   struct procstat_simple_handle *descriptors,
 			   size_t descriptors_len);
 
+#define DEFINE_PROCSTAT_FORMATTER(__type, __fmt, __fmt_name)\
+static inline ssize_t procstat_format_ ## __type ##_## __fmt_name(void *object, char *buffer, size_t len, off_t offset)\
+{\
+	return snprintf(buffer, len, __fmt, *((__type *)object));\
+}\
+
+#ifndef u64
+#define u64 uint64_t
+#endif
+
+#ifndef u32
+#define u32 uint32_t
+#endif
+
+
+DEFINE_PROCSTAT_FORMATTER(u64, "%lu\n", decimal);
+DEFINE_PROCSTAT_FORMATTER(u64, "%lx\n", hex);
+DEFINE_PROCSTAT_FORMATTER(u64, "0x%lx\n", address);
+DEFINE_PROCSTAT_FORMATTER(u32, "%u\n", decimal);
+DEFINE_PROCSTAT_FORMATTER(u32, "%x\n", hex);
+
 /**
  * @brief removes statistics item previosly created with any of creation methods
  */
