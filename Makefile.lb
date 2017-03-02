@@ -1,0 +1,30 @@
+PROCSTAT_INSTALL_DIR ?= $(shell component-tool localpath --repo=procstat --type=$(BUILD_TYPE) procstat)
+
+all: build
+
+ifeq ($(BUILD_TYPE), dev)
+CMAKE_BUILD_TYPE := Debug
+else
+CMAKE_BUILD_TYPE := Relese
+endif
+
+build_dir:
+	@mkdir -p build
+
+install_dir:
+	@mkdir -p $(PROCSTAT_INSTALL_DIR)
+
+build: |build_dir
+	(cd build && cmake -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) -DCMAKE_INSTALL_PREFIX=$(PROCSTAT_INSTALL_DIR) ../ && make)
+
+install: build |install_dir
+	(cd build; make install)
+
+checkin:
+	$(Q)component-tool checkin -v --repo=procstat --type=$(BUILD_TYPE) procstat
+
+clean:
+	@rm ./build -rf
+
+.PHONY: clean install_dir checkin build
+
