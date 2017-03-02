@@ -190,6 +190,108 @@ static void fuse_lookup(fuse_req_t req, fuse_ino_t parent_inode, const char *nam
 	fuse_reply_entry(req, &fuse_entry);
 }
 
+static void fuse_getattr(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
+{
+	struct stat stat;
+	struct procstat_context *context = request_context(req);
+	struct procstat_item *item;
+
+	memset(&stat, 0, sizeof(stat));
+	pthread_mutex_lock(&context->global_lock);
+	item = fuse_inode_to_item(context, ino);
+	if (!item_registered(item)) {
+		pthread_mutex_unlock(&context->global_lock);
+		fuse_reply_err(req, ENOENT);
+		return;
+	}
+
+	fill_item_stats(context, item, &stat);
+	pthread_mutex_unlock(&context->global_lock);
+	fuse_reply_attr(req, &stat, 1.0);
+}
+
+static void fuse_opendir(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
+{
+	struct procstat_context *context = request_context(req);
+	struct procstat_item *item;
+
+	pthread_mutex_lock(&context->global_lock);
+	item = fuse_inode_to_item(context, ino);
+
+	if (!item_registered(item)) {
+		pthread_mutex_unlock(&context->global_lock);
+		fuse_reply_err(req, ENOENT);
+		return;
+	}
+
+	pthread_mutex_unlock(&context->global_lock);
+	fuse_reply_open(req, fi);
+}
+
+#define DEFAULT_BUFER_SIZE 1024
+static void fuse_readdir(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi)
+{
+	struct procstat_context *context = request_context(req);
+	static struct procstat_directory *dir;
+	static struct procstat_item *iter;
+	char *reply_buffer = NULL;
+	size_t bufsize;
+	size_t offset;
+	int alloc_factor = 0;
+
+	pthread_mutex_lock(&context->global_lock);
+	dir = fuse_inode_to_dir(context, ino);
+
+	if (!item_registered(&dir->base)) {
+		pthread_mutex_unlock(&context->global_lock);
+		fuse_reply_err(req, ENOENT);
+		return;
+	}
+
+	/* FIXME: currently it is very naive implementation which requires lots of reallocations
+	 * this can be improved with iovec. */
+	/**
+	 * FIXME: This is very inefficient since for every lookup this is called twice with offset 0 and with
+	 * offset past last, We need to "rebuild" it and save it between "opendir" and "releasedir"
+	 */
+
+	bufsize = 0;
+	offset = 0;
+	list_for_each_entry(iter, &dir->children, entry) {
+		const char *fname;
+		size_t entry_size;
+		struct stat stat;
+
+		memset(&stat, 0, sizeof(stat));
+		fname = procstat_item_name(iter);
+		fill_item_stats(context, iter, &stat);
+		entry_size = fuse_add_direntry(req, NULL, 0, fname, NULL, 0);
+		if (bufsize <= entry_size + offset) {
+			bufsize = DEFAULT_BUFER_SIZE * (1 << alloc_factor);
+			char *new_buffer = realloc(reply_buffer, bufsize);
+
+			++alloc_factor;
+			if (!new_buffer) {
+				pthread_mutex_unlock(&context->global_lock);
+				fuse_reply_err(req, ENOMEM);
+				goto done;
+			}
+			reply_buffer = new_buffer;
+		}
+		fuse_add_direntry(req, reply_buffer + offset, entry_size, fname, &stat, offset + entry_size);
+		offset += entry_size;
+	}
+
+	pthread_mutex_unlock(&context->global_lock);
+	if (off < offset)
+		fuse_reply_buf(req, reply_buffer + off, MIN(size, offset - off));
+	else
+		fuse_reply_buf(req, NULL, 0);
+done:
+	free(reply_buffer);
+	return;
+}
+
 static int register_item(struct procstat_context *context,
 			 struct procstat_item *item,
 			 struct procstat_directory *parent)
@@ -244,7 +346,10 @@ static int init_directory(struct procstat_context *context,
 
 static struct fuse_lowlevel_ops fops = {
 	.forget = fuse_forget,
-	.lookup = fuse_lookup
+	.lookup = fuse_lookup,
+	.getattr = fuse_getattr,
+	.opendir = fuse_opendir,
+	.readdir = fuse_readdir,
 };
 
 #define ROOT_DIR_NAME "."
