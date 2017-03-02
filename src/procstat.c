@@ -6,6 +6,7 @@
 #include "list.h"
 #include <errno.h>
 #include <stdlib.h>
+#include <pthread.h>
 #include <string.h>
 #include <assert.h>
 #include <sys/param.h>
@@ -49,6 +50,7 @@ struct procstat_context {
 	struct fuse_session *session;
 	gid_t	gid;
 	uid_t   uid;
+	pthread_mutex_t global_lock;
 };
 
 static uint32_t string_hash(const char *string)
@@ -96,16 +98,20 @@ static int register_item(struct procstat_context *context,
 			 struct procstat_item *item,
 			 struct procstat_directory *parent)
 {
+	pthread_mutex_lock(&context->global_lock);
 	if (parent) {
 		struct procstat_item *duplicate;
 
 		duplicate = lookup_item_locked(parent, procstat_item_name(item), item->name_hash);
-		if (duplicate)
+		if (duplicate) {
+			pthread_mutex_unlock(&context->global_lock);
 			return EEXIST;
+		}
 		list_add_tail(&item->entry, &parent->children);
 	}
 	item->flags |= STATS_ENTRY_FLAG_REGISTERED;
 	item->refcnt = 1;
+	pthread_mutex_unlock(&context->global_lock);
 	return 0;
 }
 
@@ -174,6 +180,7 @@ struct procstat_context *procstat_create(const char *mountpoint)
 	context->uid = getuid();
 	context->gid = getgid();
 
+	pthread_mutex_init(&context->global_lock, NULL);
 	init_directory(context, &context->root, ROOT_DIR_NAME, NULL);
 
 	channel = fuse_mount(context->mountpoint, &args);
@@ -202,6 +209,7 @@ void procstat_destroy(struct procstat_context *context)
 	assert(context);
 	session = context->session;
 
+	pthread_mutex_lock(&context->global_lock);
 	if (session) {
 		struct fuse_chan *channel = NULL;
 
@@ -216,6 +224,9 @@ void procstat_destroy(struct procstat_context *context)
 	}
 
 	free(context->mountpoint);
+	pthread_mutex_unlock(&context->global_lock);
+	pthread_mutex_destroy(&context->global_lock);
+
 	/* debug purposes of use after free*/
 	context->mountpoint = NULL;
 	context->session = NULL;
