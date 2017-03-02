@@ -435,3 +435,8 @@ void procstat_destroy(struct procstat_context *context)
 	context->session = NULL;
 	free(context);
 }
+
+void procstat_loop(struct procstat_context *context)
+{
+	fuse_session_loop(context->session);
+}

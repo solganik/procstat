@@ -22,4 +22,10 @@ struct procstat_context *procstat_create(const char *mountpoint);
  */
 void procstat_destroy(struct procstat_context *context);
 
+/**
+ * @brief blocking method to handle statstics operations. This must be run from
+ * dedicated thread exactly once.
+ */
+void procstat_loop(struct procstat_context *context);
+
 #endif
