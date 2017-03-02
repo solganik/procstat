@@ -110,6 +110,19 @@ DEFINE_PROCSTAT_SIMPLE_ATTRIBUTE(u32);
 DEFINE_PROCSTAT_SIMPLE_ATTRIBUTE(u64);
 
 /**
+ * @brief defines formatter with getter method. This can be used to provide standard POD formatting with custom
+ * get function to fetch object value
+ */
+#define DEFINE_PROCSTAT_CUSTOM_FORMATTER(name, getter_function, __type, __fmt)\
+static inline ssize_t procstat_format_ ## __type ##_## name(void *object, char *buffer, size_t length, off_t offset)\
+{\
+	__type out;\
+	\
+	getter_function((__type *)object, &out);\
+	return snprintf(buffer, length, __fmt, out);\
+}\
+
+/**
  * @brief removes statistics item previosly created with any of creation methods
  */
 void procstat_remove(struct procstat_context *context, struct procstat_item *item);
