@@ -80,7 +80,6 @@ struct procstat_directory {
 	struct list_head       children;
 };
 
-
 struct procstat_file {
 	struct procstat_item	base;
 	void  	    		*private;
@@ -375,7 +374,6 @@ static void fuse_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 	fi->direct_io = true;
 	fuse_reply_open(req, fi);
 }
-
 
 #define READ_BUFFER_SIZE 100
 static void fuse_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi)
