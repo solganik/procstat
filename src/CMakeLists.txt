@@ -2,7 +2,6 @@ set(libsrc procstat.c)
 
 add_library(objlib OBJECT ${libsrc})
 set_property(TARGET objlib PROPERTY POSITION_INDEPENDENT_CODE ON)
-target_include_directories (objlib PUBLIC $ENV{WORKSPACE_TOP}/common/src/user/common/include/lb)
 
 
 add_library(procstat_shared SHARED $<TARGET_OBJECTS:objlib>)
