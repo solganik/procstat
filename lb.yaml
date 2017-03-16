@@ -1,4 +1,0 @@
-procstat:
-  procstat:
-  - common:user
-  - file://src
