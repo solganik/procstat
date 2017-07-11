@@ -822,6 +822,20 @@ struct procstat_item *procstat_root(struct procstat_context *context)
 	return &context->root.base;
 }
 
+struct procstat_context *procstat_context(struct procstat_item *item)
+{
+	struct procstat_directory *root;
+
+	assert(item);
+
+	if (!item->parent)
+		root = (struct procstat_directory *)item;
+	else
+		for (root = item->parent; root->base.parent != NULL; root = root->base.parent);
+
+	return (struct procstat_context *)root;
+}
+
 static struct fuse_lowlevel_ops fops = {
 	.read = fuse_read,
 	.forget = fuse_forget,
