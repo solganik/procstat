@@ -440,6 +440,7 @@ static int register_item(struct procstat_context *context,
 	}
 	item->flags |= STATS_ENTRY_FLAG_REGISTERED;
 	item->refcnt = 1;
+	item->parent = parent;
 	pthread_mutex_unlock(&context->global_lock);
 	return 0;
 }
