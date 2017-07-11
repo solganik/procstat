@@ -84,6 +84,12 @@ void procstat_destroy(struct procstat_context *context);
  */
 struct procstat_item *procstat_root(struct procstat_context *context);
 
+
+/**
+ * @return context that @item is attached to in hierarchy of procstat
+ */
+struct procstat_context *procstat_context(struct procstat_item *item);
+
 /**
  * @brief blocking method to handle statstics operations. This must be run from
  * dedicated thread exactly once.

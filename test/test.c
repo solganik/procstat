@@ -246,11 +246,13 @@ static void test_create_multiple_dirs_and_files(struct procstat_item *root, uint
 
 		outer = procstat_create_directory(context, root, buffer);
 		assert(outer);
+		assert(procstat_context(outer) == context);
 		for (j = 0; j < 10; ++j) {
 			struct procstat_item *inner;
 			sprintf(buffer, "inner-%d", j);
 			inner = procstat_create_directory(context, outer, buffer);
 			assert(inner);
+			assert(procstat_context(inner) == context);
 			for (k = 0; k < 10; ++k) {
 				sprintf(buffer, "value-%d", k);
 				error = procstat_create_u32(context, inner, buffer , &values_32[k]);
