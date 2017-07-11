@@ -440,6 +440,7 @@ static int register_item(struct procstat_context *context,
 	}
 	item->flags |= STATS_ENTRY_FLAG_REGISTERED;
 	item->refcnt = 1;
+	item->parent = parent;
 	pthread_mutex_unlock(&context->global_lock);
 	return 0;
 }
@@ -819,6 +820,20 @@ struct procstat_item *procstat_root(struct procstat_context *context)
 {
 	assert(context);
 	return &context->root.base;
+}
+
+struct procstat_context *procstat_context(struct procstat_item *item)
+{
+	struct procstat_directory *root;
+
+	assert(item);
+
+	if (!item->parent)
+		root = (struct procstat_directory *)item;
+	else
+		for (root = item->parent; root->base.parent != NULL; root = root->base.parent);
+
+	return (struct procstat_context *)root;
 }
 
 static struct fuse_lowlevel_ops fops = {
