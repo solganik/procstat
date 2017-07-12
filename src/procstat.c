@@ -393,6 +393,22 @@ static void fuse_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, st
 	fuse_reply_buf(req, (char *)buffer + off, MIN(bytes_written - off, size));
 }
 
+static bool valid_filename(const char *name)
+{
+	const char *c;
+
+	for (c = name; *c; ++c) {
+		if ((*c >= 'A' && *c <= 'Z') ||
+		    (*c >= 'a' && *c <= 'z') ||
+		    (*c >= '0' && *c <= '9') ||
+		    (*c == '.') || (*c == '_') || (*c == '-')) {
+			continue;
+		}
+		return false;
+	}
+	return true;
+}
+
 static void init_item(struct procstat_item *item, const char *name)
 {
 	size_t name_len = strlen(name);
@@ -547,6 +563,11 @@ static struct procstat_file *create_file(struct procstat_context *context,
 	struct procstat_file *file;
 	int error;
 
+	if (!valid_filename(name)) {
+		errno = -EINVAL;
+		return NULL;
+	}
+
 	file = allocate_file_item(name, item, callback);
 	if (!file) {
 		errno = ENOMEM;
@@ -573,6 +594,11 @@ struct procstat_item *procstat_create_directory(struct procstat_context *context
 	parent = parent_or_root(context, parent);
 	if (!parent) {
 		errno = EINVAL;
+		return NULL;
+	}
+
+	if (!valid_filename(name)) {
+		errno = -EINVAL;
 		return NULL;
 	}
 

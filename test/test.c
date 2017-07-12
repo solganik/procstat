@@ -231,6 +231,7 @@ static void create_time_series(struct procstat_item *root)
 	getchar();
 
 	procstat_remove(context, item);
+	printf("time series removed\n");
 }
 
 static void test_create_multiple_dirs_and_files(struct procstat_item *root, uint32_t *values_32)
@@ -273,6 +274,12 @@ static void test_create_multiple_dirs_and_files(struct procstat_item *root, uint
 }
 
 
+void not_create_dir_with_slash()
+{
+	struct procstat_item *item1, *item2;
+	item1 = procstat_create_directory(context, procstat_root(context), "start/end");
+	assert(!item1);
+}
 
 
 int main(int argc, char **argv) {
@@ -294,6 +301,7 @@ int main(int argc, char **argv) {
 
 	pthread_t inc_x_thread;
 	pthread_create(&inc_x_thread, NULL, fuse_loop, context);
+	not_create_dir_with_slash();
 	test_create_dirs(context);
 	test_create_multiple_dirs_and_files(NULL, values_32);
 	create_multiple_simple_stats(NULL, &values_32[0], &values_64[0], &values_16[0]);
@@ -301,6 +309,7 @@ int main(int argc, char **argv) {
 	create_multiple_series(NULL);
 	create_time_series(NULL);
 
+	printf("PRESS CTRL-C to exit\n");
 	pthread_join(inc_x_thread, NULL);
 	printf("HERE DONE!!!!\n");
 	return 0;
