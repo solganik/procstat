@@ -231,6 +231,7 @@ static void create_time_series(struct procstat_item *root)
 	getchar();
 
 	procstat_remove(context, item);
+	printf("time series removed\n");
 }
 
 static void test_create_multiple_dirs_and_files(struct procstat_item *root, uint32_t *values_32)
@@ -301,6 +302,7 @@ int main(int argc, char **argv) {
 	create_multiple_series(NULL);
 	create_time_series(NULL);
 
+	printf("PRESS CTRL-C to exit\n");
 	pthread_join(inc_x_thread, NULL);
 	printf("HERE DONE!!!!\n");
 	return 0;
