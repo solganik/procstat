@@ -398,12 +398,8 @@ static bool valid_filename(const char *name)
 	const char *c;
 
 	for (c = name; *c; ++c) {
-		if ((*c >= 'A' && *c <= 'Z') ||
-		    (*c >= 'a' && *c <= 'z') ||
-		    (*c >= '0' && *c <= '9') ||
-		    (*c == '.') || (*c == '_') || (*c == '-')) {
+		if (isalnum(*c) || (*c == '.') || (*c == '_') || (*c == '-'))
 			continue;
-		}
 		return false;
 	}
 	return true;
