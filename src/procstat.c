@@ -383,6 +383,7 @@ static void fuse_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, st
 	struct procstat_file *file = fuse_inode_to_file(ino);
 	int len_to_read = MIN((int)size, READ_BUFFER_SIZE);
 	int bytes_written;
+	size_t  result_size;
 
 	bytes_written = file->writer(file->private, buffer, len_to_read, off);
 	if (bytes_written < 0) {
@@ -391,7 +392,8 @@ static void fuse_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, st
 	}
 
 	/* Currently only support stats to 100 bytes .. FIXME: support longer stats */
-	fuse_reply_buf(req, (char *)buffer + off, MIN(bytes_written - off, size));
+	result_size = (off > bytes_written) ? 0 : MIN(bytes_written - off, len_to_read);
+	fuse_reply_buf(req, (char *)buffer + off, result_size);
 }
 
 static bool valid_filename(const char *name)
