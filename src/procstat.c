@@ -46,6 +46,7 @@
 #include <string.h>
 #include <assert.h>
 #include <sys/param.h>
+#include <ctype.h>
 
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof(*a))
