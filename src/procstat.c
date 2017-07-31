@@ -84,6 +84,7 @@ struct procstat_directory {
 struct procstat_file {
 	struct procstat_item	base;
 	void  	    		*private;
+	uint64_t		arg;
 	procstats_formatter  	writer;
 };
 
@@ -385,7 +386,7 @@ static void fuse_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, st
 	int bytes_written;
 	size_t  result_size;
 
-	bytes_written = file->writer(file->private, buffer, len_to_read, off);
+	bytes_written = file->writer(file->private, file->arg, buffer, len_to_read, off);
 	if (bytes_written < 0) {
 		fuse_reply_err(req, EIO);
 		return;
@@ -511,7 +512,7 @@ static struct procstat_item *parent_or_root(struct procstat_context *context, st
 	return NULL;
 }
 
-static ssize_t write_u64_average(void *data, char *buffer, size_t len, off_t offset)
+static ssize_t write_u64_average(void *data, uint64_t arg, char *buffer, size_t len, off_t offset)
 {
 	struct procstat_series_u64 *series = (struct procstat_series_u64 *)data;
 
@@ -521,7 +522,7 @@ static ssize_t write_u64_average(void *data, char *buffer, size_t len, off_t off
 	return snprintf(buffer, len, "%lu\n", series->sum / series->count);
 }
 
-static ssize_t write_series_min(void *data, char *buffer, size_t len, off_t offset)
+static ssize_t write_series_min(void *data, uint64_t arg, char *buffer, size_t len, off_t offset)
 {
 	struct procstat_series_u64 *series = (struct procstat_series_u64 *)data;
 
@@ -531,7 +532,7 @@ static ssize_t write_series_min(void *data, char *buffer, size_t len, off_t offs
 	return snprintf(buffer, len, "%lu\n", series->min);
 }
 
-static ssize_t write_series_max(void *data, char *buffer, size_t len, off_t offset)
+static ssize_t write_series_max(void *data, uint64_t arg, char *buffer, size_t len, off_t offset)
 {
 	struct procstat_series_u64 *series = (struct procstat_series_u64 *)data;
 
@@ -542,7 +543,7 @@ static ssize_t write_series_max(void *data, char *buffer, size_t len, off_t offs
 }
 
 
-static ssize_t write_series_stddev(void *data, char *buffer, size_t len, off_t offset)
+static ssize_t write_series_stddev(void *data, uint64_t arg, char *buffer, size_t len, off_t offset)
 {
 	struct procstat_series_u64 *series = (struct procstat_series_u64 *)data;
 	uint64_t variance;
@@ -685,6 +686,7 @@ int procstat_create_simple(struct procstat_context *context,
 
 		file = create_file(context, (struct procstat_directory *)parent,
 				   descriptor->name, descriptor->object, descriptor->fmt);
+		file->arg = descriptor->arg;
 		if (!file) {
 			--i;
 			goto error_release;
@@ -728,14 +730,14 @@ int procstat_create_u64_series(struct procstat_context *context, struct procstat
 	int error;
 
 	struct procstat_simple_handle descriptors[] = {
-		{"sum",    &series->sum, procstat_format_u64_decimal},
-		{"count",  &series->count, procstat_format_u64_decimal},
-		{"min",    series, write_series_min},
-		{"max",    series, write_series_max},
-		{"last",   &series->last, procstat_format_u64_decimal},
-		{"avg",    series, write_u64_average},
-		{"mean",   &series->mean, procstat_format_u64_decimal},
-		{"stddev", series, write_series_stddev},
+		{"sum",    &series->sum, 0UL, procstat_format_u64_decimal},
+		{"count",  &series->count, 0UL, procstat_format_u64_decimal},
+		{"min",    series, 0UL, write_series_min},
+		{"max",    series, 0UL, write_series_max},
+		{"last",   &series->last, 0UL, procstat_format_u64_decimal},
+		{"avg",    series, 0UL, write_u64_average},
+		{"mean",   &series->mean, 0UL, procstat_format_u64_decimal},
+		{"stddev", series, 0UL, write_series_stddev},
 	};
 
 	parent = parent_or_root(context, parent);
