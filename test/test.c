@@ -85,7 +85,7 @@ void inc_values_64(uint64_t *vals)
 }
 
 
-static void fetch_getter(uint16_t *object, uint16_t *out)
+static void fetch_getter(uint16_t *object, uint64_t arg, uint16_t *out)
 {
 	*out = *object;
 }
@@ -101,9 +101,9 @@ DEFINE_PROCSTAT_CUSTOM_FORMATTER(fetch, fetch_getter, uint16_t, "%u");
 static void create_multiple_simple_stats(struct procstat_item *root, uint32_t *value_32, uint64_t *value_64, uint16_t *val16)
 {
 	struct procstat_item *item;
-	struct procstat_simple_handle descriptors[] = {{"val_32", value_32, procstat_format_u32_decimal},
-						       {"val_64", value_64, procstat_format_u64_decimal},
-							"val_16", val16, procstat_format_uint16_t_fetch};
+	struct procstat_simple_handle descriptors[] = {{"val_32", value_32, 0, procstat_format_u32_decimal},
+						       {"val_64", value_64, 0, procstat_format_u64_decimal},
+							"val_16", val16, 0, procstat_format_uint16_t_fetch};
 	int error;
 
 	item = procstat_create_directory(context, root, "multiple-simple");
