@@ -40,6 +40,7 @@
 #include <stddef.h>
 #include <unistd.h>
 #include <stdio.h>
+#include "percentile.h"
 
 struct procstat_context;
 struct procstat_item;
@@ -54,7 +55,6 @@ struct procstat_item;
  * is large > 4K
  */
 typedef ssize_t (*procstats_formatter)(void *object, uint64_t arg, char *buffer, size_t length, off_t offset);
-
 
 /**
  * @brief registration parameter for simple value statistics
@@ -240,6 +240,25 @@ struct procstat_series_u64 {
 	uint64_t aggregated_variance;
 };
 
+
+/**
+ * @brief callback to calculate histogram values
+ */
+typedef void (*percentiles_calculator)(uint32_t *histogram,
+					uint64_t samples_count,
+					struct procstat_percentile_result *result,
+					unsigned result_len);
+
+#define MAX_SUPPORTED_PERCENTILE 20
+struct procstat_histogram_u32 {
+	uint64_t 			  sum;
+	uint64_t 			  count;
+	uint64_t 			  last;
+	int	 			  npercentile;
+	struct procstat_percentile_result percentile[MAX_SUPPORTED_PERCENTILE];
+	uint32_t 			  *histogram;
+};
+
 /**
  * @brief create series statistics.
  */
@@ -271,5 +290,11 @@ void procstat_remove(struct procstat_context *context, struct procstat_item *ite
  */
 int procstat_remove_by_name(struct procstat_context *context, struct procstat_item *parent, const char *name);
 
+
+
+int procstat_create_histogram_u32_series(struct procstat_context *context, struct procstat_item *parent,
+					 const char *name, struct procstat_histogram_u32 *series);
+
+void procstat_histogram_u32_add_point(struct procstat_histogram_u32 *series, uint32_t value);
 
 #endif
