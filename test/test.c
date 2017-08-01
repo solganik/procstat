@@ -282,6 +282,38 @@ void not_create_dir_with_slash()
 }
 
 
+void create_histogram(void)
+{
+	struct procstat_histogram_u32 series = {.percentile = {{.fraction = 0.1f},
+							       {.fraction = 0.6f},
+							       {.fraction = 0.9f},
+							       {.fraction = 0.99f},
+							       {.fraction = 0.9999f}},
+						.npercentile = 5};
+	int error;
+	int i;
+
+	error = procstat_create_histogram_u32_series(context, NULL, "hist", &series);
+	assert(!error);
+
+	for (i = 0; i < 1000000; ++i) {
+		procstat_histogram_u32_add_point(&series, i);
+	}
+
+	printf("Obsefve values\n");
+	getchar();
+
+	procstat_percentile_calculate(series.histogram, series.count, series.percentile, 5);
+	assert(series.percentile[0].value == 99840);
+	assert(series.percentile[1].value == 602112);
+	assert(series.percentile[2].value == 897024);
+	assert(series.percentile[3].value == 987136);
+	assert(series.percentile[4].value == 1003520);
+
+	procstat_remove_by_name(context, NULL, "hist");
+
+}
+
 int main(int argc, char **argv) {
 	struct procstat_item *item;
 	uint32_t values_32[10];
@@ -308,6 +340,7 @@ int main(int argc, char **argv) {
 	create_multiple_start_end_stats(NULL);
 	create_multiple_series(NULL);
 	create_time_series(NULL);
+	create_histogram();
 
 	printf("PRESS CTRL-C to exit\n");
 	pthread_join(inc_x_thread, NULL);
