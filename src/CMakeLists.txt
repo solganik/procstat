@@ -1,4 +1,4 @@
-set(libsrc procstat.c)
+set(libsrc procstat.c percentile.c)
 
 add_library(objlib OBJECT ${libsrc})
 set_property(TARGET objlib PROPERTY POSITION_INDEPENDENT_CODE ON)
