@@ -257,6 +257,7 @@ struct procstat_histogram_u32 {
 	int	 			  npercentile;
 	struct procstat_percentile_result percentile[MAX_SUPPORTED_PERCENTILE];
 	uint32_t 			  *histogram;
+	percentiles_calculator 		  compute_cb;
 };
 
 /**

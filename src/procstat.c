@@ -980,7 +980,7 @@ static ssize_t procstat_fmt_u32_percentile(void *object, uint64_t arg, char *buf
 {
 	struct procstat_histogram_u32 *series = object;
 
-	procstat_percentile_calculate(series->histogram, series->count, series->percentile, series->npercentile);
+	series->compute_cb(series->histogram, series->count, series->percentile, series->npercentile);
 	return procstat_format_u32_decimal(&series->percentile[arg].value, 0, buffer, length, offset);
 }
 
@@ -1048,6 +1048,9 @@ int procstat_create_histogram_u32_series(struct procstat_context *context, struc
 		errno = error;
 		goto fail_remove_stat;
 	}
+
+	if (!series->compute_cb)
+		series->compute_cb = procstat_percentile_calculate;
 
 	for (i = 0; i < series->npercentile; ++i) {
 		char stat_name[100];
