@@ -527,7 +527,8 @@ static struct procstat_item *parent_or_root(struct procstat_context *context, st
 
 static ssize_t write_u64_average(void *data, uint64_t arg, char *buffer, size_t len, off_t offset)
 {
-	struct procstat_series_u64 *series = (struct procstat_series_u64 *)data;
+	struct procstat_series *series_stat = (struct procstat_series *)data;
+	struct procstat_series_u64 *series = series_stat->private;
 
 	if (!series->count)
 		return snprintf(buffer, len, "nan");
@@ -537,7 +538,8 @@ static ssize_t write_u64_average(void *data, uint64_t arg, char *buffer, size_t 
 
 static ssize_t write_series_min(void *data, uint64_t arg, char *buffer, size_t len, off_t offset)
 {
-	struct procstat_series_u64 *series = (struct procstat_series_u64 *)data;
+	struct procstat_series *series_stat = (struct procstat_series *)data;
+	struct procstat_series_u64 *series = series_stat->private;
 
 	if (!series->count)
 		return snprintf(buffer, len, "nan");
@@ -547,7 +549,8 @@ static ssize_t write_series_min(void *data, uint64_t arg, char *buffer, size_t l
 
 static ssize_t write_series_max(void *data, uint64_t arg, char *buffer, size_t len, off_t offset)
 {
-	struct procstat_series_u64 *series = (struct procstat_series_u64 *)data;
+	struct procstat_series *series_stat = (struct procstat_series *)data;
+	struct procstat_series_u64 *series = series_stat->private;
 
 	if (!series->count)
 		return snprintf(buffer, len, "nan");
@@ -558,7 +561,8 @@ static ssize_t write_series_max(void *data, uint64_t arg, char *buffer, size_t l
 
 static ssize_t write_series_stddev(void *data, uint64_t arg, char *buffer, size_t len, off_t offset)
 {
-	struct procstat_series_u64 *series = (struct procstat_series_u64 *)data;
+	struct procstat_series *series_stat = (struct procstat_series *)data;
+	struct procstat_series_u64 *series = series_stat->private;
 	uint64_t variance;
 
 	if (series->count < 2)
@@ -736,22 +740,29 @@ void procstat_u64_series_add_point(struct procstat_series_u64 *series, uint64_t 
 	series->aggregated_variance += delta * delta2;
 }
 
+static int register_u64_series_files(struct procstat_context *context,
+				     struct procstat_series *series_stat)
+{
+	struct procstat_series_u64 *series = series_stat->private;
+	struct procstat_simple_handle descriptors[] = {
+			{"sum",    &series->sum, 0UL, procstat_format_u64_decimal},
+			{"count",  &series->count, 0UL, procstat_format_u64_decimal},
+			{"min",    series_stat, 0UL, write_series_min},
+			{"max",    series_stat, 0UL, write_series_max},
+			{"last",   &series->last, 0UL, procstat_format_u64_decimal},
+			{"avg",    series_stat, 0UL, write_u64_average},
+			{"mean",   &series->mean, 0UL, procstat_format_u64_decimal},
+			{"stddev", series_stat, 0UL, write_series_stddev}};
+
+
+	return procstat_create_simple(context, &series_stat->root.base, descriptors, ARRAY_SIZE(descriptors));
+}
+
 int procstat_create_u64_series(struct procstat_context *context, struct procstat_item *parent,
 			       const char *name, struct procstat_series_u64 *series)
 {
 	struct procstat_series *series_stat;
 	int error;
-
-	struct procstat_simple_handle descriptors[] = {
-		{"sum",    &series->sum, 0UL, procstat_format_u64_decimal},
-		{"count",  &series->count, 0UL, procstat_format_u64_decimal},
-		{"min",    series, 0UL, write_series_min},
-		{"max",    series, 0UL, write_series_max},
-		{"last",   &series->last, 0UL, procstat_format_u64_decimal},
-		{"avg",    series, 0UL, write_u64_average},
-		{"mean",   &series->mean, 0UL, procstat_format_u64_decimal},
-		{"stddev", series, 0UL, write_series_stddev},
-	};
 
 	parent = parent_or_root(context, parent);
 	if (!parent) {
@@ -764,6 +775,7 @@ int procstat_create_u64_series(struct procstat_context *context, struct procstat
 		errno = ENOMEM;
 		return -1;
 	}
+	series_stat->private = series;
 
 	series->min = ULLONG_MAX;
 	error = init_directory(context, &series_stat->root,
@@ -774,8 +786,7 @@ int procstat_create_u64_series(struct procstat_context *context, struct procstat
 		return -1;
 	}
 
-
-	error = procstat_create_simple(context, &series_stat->root.base, descriptors, ARRAY_SIZE(descriptors));
+	error = register_u64_series_files(context, series_stat);
 	if (error) {
 		procstat_remove(context, parent);
 		errno = error;
