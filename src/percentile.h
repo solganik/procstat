@@ -103,7 +103,20 @@
 #define PROCSTAT_PERCENTILE_ARR_NR (PROCSTAT_GROUP_NR * PROCSTAT_BUCKET_VALUES)
 
 
- /**
+struct procstat_percentile_result {
+	float 	 fraction;
+	uint32_t value;
+};
+
+/**
  * @brief adds @value point to @histogram of length at least @PROCSTAT_PERCENTILE_ARR_NR
  */
 void procstat_hist_add_point(uint32_t *histogram, uint32_t value);
+
+/**
+ * @brief calculates percentiles on histogram
+ */
+void procstat_percentile_calculate(uint32_t *histogram,
+				   uint64_t samples_count,
+				   struct procstat_percentile_result *result,
+				   unsigned result_len);
