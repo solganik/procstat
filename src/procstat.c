@@ -54,7 +54,8 @@
 
 enum {
 	STATS_ENTRY_FLAG_REGISTERED  = 1 << 0,
-	STATS_ENTRY_FLAG_DIR	     = 1 << 1
+	STATS_ENTRY_FLAG_DIR	     = 1 << 1,
+	STATS_ENTRY_FLAG_HISTOGRAM   = 1 << 2
 };
 
 #define DNAME_INLINE_LEN 32
@@ -162,6 +163,15 @@ static bool item_type_directory(struct procstat_item *item)
 	return (item->flags & STATS_ENTRY_FLAG_DIR);
 }
 
+static void free_histogram(struct procstat_series *series)
+{
+	struct procstat_histogram_u32 *hist = series->private;
+
+	if (!hist->histogram)
+		return;
+	free(hist->histogram);
+}
+
 static void free_item(struct procstat_item *item)
 {
 	list_del(&item->entry);
@@ -172,6 +182,9 @@ static void free_item(struct procstat_item *item)
 
 	if (!stats_item_short_name(item))
 		free(item->name.buffer);
+
+	if (item->flags & STATS_ENTRY_FLAG_HISTOGRAM)
+		free_histogram((struct procstat_series *)item);
 
 	free(item);
 }
@@ -961,4 +974,95 @@ void procstat_destroy(struct procstat_context *context)
 void procstat_loop(struct procstat_context *context)
 {
 	fuse_session_loop(context->session);
+}
+
+static ssize_t procstat_fmt_u32_percentiles(void *object, uint64_t arg, char *buffer, size_t length, off_t offset)
+{
+	struct procstat_histogram_u32 *series = object;
+
+	procstat_percentile_calculate(series->histogram, series->count, series->percentile, series->npercentile);
+	return procstat_format_u32_decimal(&series->percentile[arg].value, 0, buffer, length, offset);
+}
+
+
+void procstat_histogram_u32_add_point(struct procstat_histogram_u32 *series, uint32_t value)
+{
+	++series->count;
+	series->sum += value;
+
+	procstat_hist_add_point(series->histogram, value);
+}
+
+static ssize_t write_histogram_u32_average(void *data, uint64_t arg, char *buffer, size_t len, off_t offset)
+{
+	struct procstat_histogram_u32 *series = (struct procstat_histogram_u32 *)data;
+
+	if (!series->count)
+		return snprintf(buffer, len, "nan");
+
+	return snprintf(buffer, len, "%lu\n", series->sum / series->count);
+}
+
+int procstat_create_histogram_u32_series(struct procstat_context *context, struct procstat_item *parent,
+					 const char *name, struct procstat_histogram_u32 *series)
+{
+	int i;
+	struct procstat_series *series_stat;
+	int error;
+	struct procstat_simple_handle descriptors[] = {
+		{"sum",    &series->sum, 0, procstat_format_u64_decimal},
+		{"count",  &series->count, 0, procstat_format_u64_decimal},
+		{"last",   &series->last, 0, procstat_format_u64_decimal},
+		{"avg",    series, 0, write_histogram_u32_average},
+	};
+
+	parent = parent_or_root(context, parent);
+	if (!parent) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	series_stat = calloc(1, sizeof(*series_stat));
+	if (!series_stat) {
+		errno = ENOMEM;
+		return -1;
+	}
+
+	error = init_directory(context, &series_stat->root, name, (struct procstat_directory *)parent);
+	if (error) {
+		free_item(&series_stat->root.base);
+		errno = error;
+		return -1;
+	}
+
+	series_stat->root.base.flags |= STATS_ENTRY_FLAG_HISTOGRAM;
+	series_stat->private = series;
+	series->histogram = calloc(PROCSTAT_PERCENTILE_ARR_NR, sizeof(uint32_t));
+	if (!series->histogram) {
+		errno = ENOMEM;
+		goto fail_remove_stat;
+	}
+
+	error = procstat_create_simple(context, &series_stat->root.base, descriptors, ARRAY_SIZE(descriptors));
+	if (error) {
+		errno = error;
+		goto fail_remove_stat;
+	}
+
+	for (i = 0; i < series->npercentile; ++i) {
+		char stat_name[100];
+		struct procstat_file *file;
+
+		sprintf(stat_name, "%.4g", series->percentile[i].fraction * 100);
+		file = create_file(context, (struct procstat_directory *)&series_stat->root.base,
+				   stat_name, series, procstat_fmt_u32_percentiles);
+		if (!file)
+			goto fail_remove_stat;
+		file->arg = i;
+	}
+
+	return 0;
+fail_remove_stat:
+	procstat_remove(context, &series_stat->root.base);
+	return -1;
 }
