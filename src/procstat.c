@@ -55,7 +55,8 @@
 enum {
 	STATS_ENTRY_FLAG_REGISTERED  = 1 << 0,
 	STATS_ENTRY_FLAG_DIR	     = 1 << 1,
-	STATS_ENTRY_FLAG_HISTOGRAM   = 1 << 2
+	STATS_ENTRY_FLAG_HISTOGRAM   = 1 << 2,
+	STATS_ENTRY_CONTROL	     = 1 << 3
 };
 
 #define DNAME_INLINE_LEN 32
@@ -87,6 +88,12 @@ struct procstat_file {
 	void  	    		*private;
 	uint64_t		arg;
 	procstats_formatter  	writer;
+};
+
+struct procstat_control {
+	struct procstat_item	base;
+	void  	    		*private;
+	procstat_control_cb     callback;
 };
 
 struct procstat_context {
@@ -163,6 +170,11 @@ static bool item_type_directory(struct procstat_item *item)
 	return (item->flags & STATS_ENTRY_FLAG_DIR);
 }
 
+static bool item_type_control(struct procstat_item *item)
+{
+	return (item->flags & STATS_ENTRY_CONTROL);
+}
+
 static void free_histogram(struct procstat_series *series)
 {
 	struct procstat_histogram_u32 *hist = series->private;
@@ -218,7 +230,7 @@ static void fill_item_stats(struct procstat_context *context, struct procstat_it
 		stat->st_nlink = root_directory(context, (struct procstat_directory *)item) ? 2 : 1;
 		return;
 	}
-	stat->st_mode = S_IFREG | 0444;
+	stat->st_mode = S_IFREG | ((item->flags & STATS_ENTRY_CONTROL) ? 0666 :  0444);
 	stat->st_nlink = 1;
 	stat->st_size = 0;
 	stat->st_blocks = 0;
@@ -305,6 +317,25 @@ static void fuse_opendir(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *
 	fuse_reply_open(req, fi);
 }
 
+static void fuse_write(fuse_req_t req, fuse_ino_t ino, const char *buf,
+		       size_t size, off_t off, struct fuse_file_info *fi)
+{
+	int error;
+	struct procstat_control *control = (struct procstat_control *)ino;
+	struct procstat_item *item = (struct procstat_item *)ino;
+
+	if (!item_type_control(item)) {
+		fuse_reply_err(req, EIO);
+		return;
+	}
+
+	error = control->callback(control->private, buf, size, off);
+	if (!error)
+		fuse_reply_write(req, size);
+	else
+		fuse_reply_err(req, error);
+}
+
 #define DEFAULT_BUFER_SIZE 1024
 static void fuse_readdir(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi)
 {
@@ -369,17 +400,29 @@ done:
 	return;
 }
 
+static bool allowed_open(struct procstat_item *item, struct fuse_file_info *fi)
+{
+	/* non control items can be only opened as readonly */
+	return (((fi->flags & 3) == O_RDONLY || item_type_control(item)));
+}
+
 static void fuse_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 {
 	struct procstat_context *context = request_context(req);
-	struct procstat_file *file;
+	struct procstat_item *item;
 
 	pthread_mutex_lock(&context->global_lock);
-	file = fuse_inode_to_file(ino);
+	item = (struct procstat_item *)(ino);
 
-	if (!item_registered(&file->base)) {
-		fuse_reply_err(req, ENOENT);
+	if (!item_registered(item)) {
 		pthread_mutex_unlock(&context->global_lock);
+		fuse_reply_err(req, EACCES);
+		return;
+	}
+
+	if (!allowed_open(item, fi)) {
+		pthread_mutex_unlock(&context->global_lock);
+		fuse_reply_err(req, EACCES);
 		return;
 	}
 
@@ -394,11 +437,19 @@ static void fuse_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 static void fuse_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi)
 {
 	char buffer[READ_BUFFER_SIZE];
-	struct procstat_file *file = fuse_inode_to_file(ino);
+	struct procstat_item *item = (struct procstat_item *)ino;
+	struct procstat_file *file;
 	int len_to_read = MIN((int)size, READ_BUFFER_SIZE);
 	int bytes_written;
 	size_t  result_size;
 
+	/* control file is always empty */
+	if (item_type_control(item)) {
+		fuse_reply_buf(req, NULL, 0);
+		return;
+	}
+
+	file = fuse_inode_to_file(ino);
 	bytes_written = file->writer(file->private, file->arg, buffer, len_to_read, off);
 	if (bytes_written < 0) {
 		fuse_reply_err(req, EIO);
@@ -598,6 +649,37 @@ static struct procstat_file *create_file(struct procstat_context *context,
 		return NULL;
 
 	}
+	return file;
+}
+
+static struct procstat_control *create_control_file(struct procstat_context *context,
+					            struct procstat_directory *parent,
+						    const char *name, void *item,
+						    procstat_control_cb callback)
+{
+	struct procstat_control *file;
+	int error;
+
+	if (!valid_filename(name)) {
+		errno = -EINVAL;
+		return NULL;
+	}
+
+	file = calloc(1, sizeof(*file));
+	if (!file)
+		return NULL;
+
+	init_item(&file->base, name);
+	file->private = item;
+	file->callback = callback;
+
+	error = register_item(context,&file->base, parent);
+	if (error) {
+		errno = error;
+		free_item(&file->base);
+		return NULL;
+	}
+	file->base.flags |= STATS_ENTRY_CONTROL;
 	return file;
 }
 
@@ -887,6 +969,41 @@ struct procstat_context *procstat_context(struct procstat_item *item)
 	return (struct procstat_context *)root;
 }
 
+void fuse_setattr(fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set, struct fuse_file_info *fi)
+{
+	struct stat stat;
+	struct procstat_context *context = request_context(req);
+	struct procstat_item *item;
+
+	memset(&stat, 0, sizeof(stat));
+	pthread_mutex_lock(&context->global_lock);
+
+	item = fuse_inode_to_item(context, ino);
+	if (!item_registered(item)) {
+		pthread_mutex_unlock(&context->global_lock);
+		fuse_reply_err(req, ENOENT);
+		return;
+	}
+
+	/* only support control files  */
+	if (!item_type_control(item)) {
+		pthread_mutex_unlock(&context->global_lock);
+		fuse_reply_err(req, EPERM);
+		return;
+	}
+
+	/* only support for truncate as it is needed during write */
+	if (to_set != FUSE_SET_ATTR_SIZE) {
+		pthread_mutex_unlock(&context->global_lock);
+		fuse_reply_err(req, EINVAL);
+		return;
+	}
+
+	fill_item_stats(context, item, &stat);
+	pthread_mutex_unlock(&context->global_lock);
+	fuse_reply_attr(req, &stat, 1.0);
+}
+
 static struct fuse_lowlevel_ops fops = {
 	.read = fuse_read,
 	.forget = fuse_forget,
@@ -895,6 +1012,8 @@ static struct fuse_lowlevel_ops fops = {
 	.opendir = fuse_opendir,
 	.readdir = fuse_readdir,
 	.open = fuse_open,
+	.write = fuse_write,
+	.setattr = fuse_setattr
 };
 
 #define ROOT_DIR_NAME "."
@@ -1079,4 +1198,16 @@ int procstat_create_histogram_u32_series(struct procstat_context *context, struc
 fail_remove_stat:
 	procstat_remove(context, &series_stat->root.base);
 	return -1;
+}
+
+int procstat_create_control(struct procstat_context *context, struct procstat_item *parent,
+			    struct procstat_control_handle *descriptor)
+{
+	struct procstat_control *control;
+
+	control = create_control_file(context, (struct procstat_directory *)parent,
+				      descriptor->name, descriptor->object, descriptor->callback);
+	if (!control)
+		return -1;
+	return 0;
 }
