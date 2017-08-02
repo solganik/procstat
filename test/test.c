@@ -227,11 +227,25 @@ static void create_time_series(struct procstat_item *root)
 		procstat_u64_series_add_point(&series, rdtsc() - start);
 	}
 
+	printf("Now reset series \n");
+	getchar();
+	procstat_u64_series_add_point(&series, rdtsc() - start);
+
+	printf("and press enter to submit more data \n");
+	getchar();
+
+	for (i = 0; i < 200; ++i) {
+		start = rdtsc();
+		usleep(1000 * 100);
+		procstat_u64_series_add_point(&series, rdtsc() - start);
+	}
+
 	printf("Press enter to Delete series stats \n");
 	getchar();
 
 	procstat_remove(context, item);
-	printf("time series removed\n");
+	printf("Press any key to continue\n");
+	getchar();
 }
 
 static void test_create_multiple_dirs_and_files(struct procstat_item *root, uint32_t *values_32)

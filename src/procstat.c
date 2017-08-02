@@ -47,6 +47,7 @@
 #include <assert.h>
 #include <sys/param.h>
 #include <ctype.h>
+#include <stdlib.h>
 
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof(*a))
@@ -576,53 +577,6 @@ static struct procstat_item *parent_or_root(struct procstat_context *context, st
 	return NULL;
 }
 
-static ssize_t write_u64_average(void *data, uint64_t arg, char *buffer, size_t len, off_t offset)
-{
-	struct procstat_series *series_stat = (struct procstat_series *)data;
-	struct procstat_series_u64 *series = series_stat->private;
-
-	if (!series->count)
-		return snprintf(buffer, len, "nan");
-
-	return snprintf(buffer, len, "%lu\n", series->sum / series->count);
-}
-
-static ssize_t write_series_min(void *data, uint64_t arg, char *buffer, size_t len, off_t offset)
-{
-	struct procstat_series *series_stat = (struct procstat_series *)data;
-	struct procstat_series_u64 *series = series_stat->private;
-
-	if (!series->count)
-		return snprintf(buffer, len, "nan");
-
-	return snprintf(buffer, len, "%lu\n", series->min);
-}
-
-static ssize_t write_series_max(void *data, uint64_t arg, char *buffer, size_t len, off_t offset)
-{
-	struct procstat_series *series_stat = (struct procstat_series *)data;
-	struct procstat_series_u64 *series = series_stat->private;
-
-	if (!series->count)
-		return snprintf(buffer, len, "nan");
-
-	return snprintf(buffer, len, "%lu\n", series->max);
-}
-
-
-static ssize_t write_series_stddev(void *data, uint64_t arg, char *buffer, size_t len, off_t offset)
-{
-	struct procstat_series *series_stat = (struct procstat_series *)data;
-	struct procstat_series_u64 *series = series_stat->private;
-	uint64_t variance;
-
-	if (series->count < 2)
-		return snprintf(buffer, len, "nan");
-
-	variance = series->aggregated_variance / (series->count - 1);
-	return snprintf(buffer, len, "%lu\n", (uint64_t)sqrt(variance));
-}
-
 static struct procstat_file *create_file(struct procstat_context *context,
 					 struct procstat_directory *parent,
 					 const char *name, void *item,
@@ -804,6 +758,19 @@ void procstat_u64_series_add_point(struct procstat_series_u64 *series, uint64_t 
 	int64_t delta;
 	int64_t delta2;
 	int64_t avg_delta;
+	unsigned reset;
+
+	/* We dont care about ordering of reset with another thread
+	 * we dont care if because of some raise we will do 2 resets */
+	reset = __atomic_load_n(&series->reset, __ATOMIC_RELAXED);
+	if (reset) {
+		series->count = 0;
+		series->sum = 0;
+		series->mean = 0;
+		series->aggregated_variance = 0;
+		series->min = ULLONG_MAX;
+		__atomic_store_n(&series->reset, 0, __ATOMIC_RELEASE);
+	}
 
 	if (value < series->min)
 		series->min = value;
@@ -822,28 +789,116 @@ void procstat_u64_series_add_point(struct procstat_series_u64 *series, uint64_t 
 	series->aggregated_variance += delta * delta2;
 }
 
+enum series_u64_type{
+	SERIES_SUM = 0,
+	SERIES_COUNT = 1,
+	SERIES_MIN = 2,
+	SERIES_MAX = 3,
+	SERIES_LAST = 4,
+	SERIES_AVG = 5,
+	SERIES_MEAN = 6,
+	SERIES_STDEV = 7,
+};
+
+static ssize_t series_u64_read(void *object, uint64_t arg, char *buffer, size_t len, off_t offset)
+{
+	struct procstat_series_u64 *series = object;
+	enum series_u64_type type = arg;
+	int reset;
+	uint64_t zero = 0;
+	uint64_t *data_ptr = NULL;
+	uint64_t data;
+	uint64_t count = series->count;
+
+	reset = __atomic_load_n(&series->reset, __ATOMIC_ACQUIRE);
+	switch (type) {
+	case SERIES_SUM:
+		data_ptr = (reset) ? &zero : &series->sum;
+		goto write_var;
+	case SERIES_COUNT:
+		data_ptr = (reset) ? &zero : &series->count;
+		goto write_var;
+	case SERIES_LAST:
+		data_ptr = (reset) ? &zero : &series->last;
+		goto write_var;
+	case SERIES_MEAN:
+		data_ptr = (reset) ? &zero : &series->mean;
+		goto write_var;
+	case SERIES_MIN:
+		if (!series->count || reset)
+			goto write_nan;
+
+		data_ptr = &series->min;
+		goto write_var;
+
+	case SERIES_MAX:
+		if (!series->count || reset)
+			goto write_nan;
+
+		data_ptr = &series->max;
+		goto write_var;
+	case SERIES_AVG:
+		if (!count || reset)
+			goto write_nan;
+
+		data = series->sum / count;
+		data_ptr = &data;
+		goto write_var;
+	case SERIES_STDEV:
+		if (count < 2 || reset)
+			goto write_nan;
+		data = series->aggregated_variance / (count - 1);
+		data_ptr = &data;
+		goto write_var;
+	default:
+		return -1;
+	}
+write_nan:
+	return snprintf(buffer, len, "nan");
+write_var:
+	return procstat_format_u64_decimal(data_ptr, arg, buffer, len, offset);
+
+}
+
 static int register_u64_series_files(struct procstat_context *context,
 				     struct procstat_series *series_stat)
 {
 	struct procstat_series_u64 *series = series_stat->private;
 	struct procstat_simple_handle descriptors[] = {
-			{"sum",    &series->sum, 0UL, procstat_format_u64_decimal},
-			{"count",  &series->count, 0UL, procstat_format_u64_decimal},
-			{"min",    series_stat, 0UL, write_series_min},
-			{"max",    series_stat, 0UL, write_series_max},
-			{"last",   &series->last, 0UL, procstat_format_u64_decimal},
-			{"avg",    series_stat, 0UL, write_u64_average},
-			{"mean",   &series->mean, 0UL, procstat_format_u64_decimal},
-			{"stddev", series_stat, 0UL, write_series_stddev}};
+			{"sum",    series, SERIES_SUM, series_u64_read},
+			{"count",  series, SERIES_COUNT, series_u64_read},
+			{"min",    series, SERIES_MIN, series_u64_read},
+			{"max",    series, SERIES_MAX, series_u64_read},
+			{"last",   series, SERIES_LAST, series_u64_read},
+			{"avg",    series, SERIES_AVG, series_u64_read},
+			{"mean",   series, SERIES_MEAN, series_u64_read},
+			{"stddev", series, SERIES_STDEV, series_u64_read}};
 
 
 	return procstat_create_simple(context, &series_stat->root.base, descriptors, ARRAY_SIZE(descriptors));
+}
+
+static int reset_u64_series(void *object, const char *buffer, size_t length, off_t offset)
+{
+	struct procstat_series *series_stat = object;
+	struct procstat_series_u64 *series = series_stat->private;
+	uint32_t control;
+
+	control = strtoul(buffer, NULL, 10);
+	if (errno)
+		return errno;
+	if (control != 1)
+		return EINVAL;
+
+	__atomic_store_n(&series->reset, 1, __ATOMIC_RELAXED);
+	return 0;
 }
 
 int procstat_create_u64_series(struct procstat_context *context, struct procstat_item *parent,
 			       const char *name, struct procstat_series_u64 *series)
 {
 	struct procstat_series *series_stat;
+	struct procstat_control *control;
 	int error;
 
 	parent = parent_or_root(context, parent);
@@ -870,11 +925,18 @@ int procstat_create_u64_series(struct procstat_context *context, struct procstat
 
 	error = register_u64_series_files(context, series_stat);
 	if (error) {
-		procstat_remove(context, parent);
 		errno = error;
-		return -1;
+		goto error_remove_stat;
 	}
+
+	control = create_control_file(context, &series_stat->root, "reset", series_stat, reset_u64_series);
+	if (!control)
+		goto error_remove_stat;
 	return 0;
+
+error_remove_stat:
+	procstat_remove(context, parent);
+	return -1;
 }
 
 int procstat_create_multiple_u64_series(struct procstat_context *context,
