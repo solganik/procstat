@@ -314,6 +314,44 @@ void create_histogram(void)
 
 }
 
+static int procstat_control_set_u64(void *object, const char *buffer, size_t length, off_t offset)
+{
+	uint64_t *ptr = object;
+	uint64_t value;
+
+	value = strtoul(buffer, NULL, 10);
+	if (errno)
+		return errno;
+	*ptr = value;
+	return 0;
+}
+
+
+void test_control(void)
+{
+	struct procstat_item *item;
+	int error;
+	struct procstat_control_handle control = {.name="set", .callback = procstat_control_set_u64};
+
+	item = procstat_create_directory(context, procstat_root(context), "with_control");
+	assert(item);
+	uint64_t counter;
+
+	error = procstat_create_u64(context, item, "count", &counter);
+	assert(!error);
+
+	control.object = &counter;
+
+	error = procstat_create_control(context, item, &control);
+	assert(!error);
+
+	printf("Write to control and read value");
+	printf("Press enter To inc values\n");
+	getchar();
+
+	procstat_remove(context, item);
+}
+
 int main(int argc, char **argv) {
 	struct procstat_item *item;
 	uint32_t values_32[10];
@@ -341,6 +379,7 @@ int main(int argc, char **argv) {
 	create_multiple_series(NULL);
 	create_time_series(NULL);
 	create_histogram();
+	test_control();
 
 	printf("PRESS CTRL-C to exit\n");
 	pthread_join(inc_x_thread, NULL);
