@@ -261,6 +261,7 @@ struct procstat_series_u64 {
 	uint64_t last;
 	uint64_t mean;
 	uint64_t aggregated_variance;
+	unsigned reset;
 };
 
 
