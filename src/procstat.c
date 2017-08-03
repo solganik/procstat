@@ -468,7 +468,7 @@ static void fuse_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, st
 
 	file = fuse_inode_to_file(ino);
 	if (off == 0)
-		read_buffer->size = file->writer(file->private, file->arg, read_buffer->buffer, READ_BUFFER_SIZE, 0);
+		read_buffer->size = file->writer(file->private, file->arg, read_buffer->buffer, READ_BUFFER_SIZE);
 
 	if (off >= read_buffer->size) {
 		fuse_reply_buf(req, NULL, 0);
@@ -817,7 +817,7 @@ enum series_u64_type{
 	SERIES_STDEV = 7,
 };
 
-static ssize_t series_u64_read(void *object, uint64_t arg, char *buffer, size_t len, off_t offset)
+static ssize_t series_u64_read(void *object, uint64_t arg, char *buffer, size_t len)
 {
 	struct procstat_series_u64 *series = object;
 	enum series_u64_type type = arg;
@@ -874,7 +874,7 @@ static ssize_t series_u64_read(void *object, uint64_t arg, char *buffer, size_t 
 write_nan:
 	return snprintf(buffer, len, "nan");
 write_var:
-	return procstat_format_u64_decimal(data_ptr, arg, buffer, len, offset);
+	return procstat_format_u64_decimal(data_ptr, arg, buffer, len);
 
 }
 
@@ -1192,12 +1192,12 @@ void procstat_loop(struct procstat_context *context)
 	fuse_session_loop(context->session);
 }
 
-static ssize_t procstat_fmt_u32_percentile(void *object, uint64_t arg, char *buffer, size_t length, off_t offset)
+static ssize_t procstat_fmt_u32_percentile(void *object, uint64_t arg, char *buffer, size_t length)
 {
 	struct procstat_histogram_u32 *series = object;
 
 	series->compute_cb(series->histogram, series->count, series->percentile, series->npercentile);
-	return procstat_format_u32_decimal(&series->percentile[arg].value, 0, buffer, length, offset);
+	return procstat_format_u32_decimal(&series->percentile[arg].value, 0, buffer, length);
 }
 
 
@@ -1209,7 +1209,7 @@ void procstat_histogram_u32_add_point(struct procstat_histogram_u32 *series, uin
 	procstat_hist_add_point(series->histogram, value);
 }
 
-static ssize_t write_histogram_u32_average(void *data, uint64_t arg, char *buffer, size_t len, off_t offset)
+static ssize_t write_histogram_u32_average(void *data, uint64_t arg, char *buffer, size_t len)
 {
 	struct procstat_histogram_u32 *series = (struct procstat_histogram_u32 *)data;
 

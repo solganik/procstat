@@ -54,7 +54,7 @@ struct procstat_item;
  * @param offset to return from beginning of buffer. This can be ignored in case statistics string
  * is large > 4K
  */
-typedef ssize_t (*procstats_formatter)(void *object, uint64_t arg, char *buffer, size_t length, off_t offset);
+typedef ssize_t (*procstats_formatter)(void *object, uint64_t arg, char *buffer, size_t length);
 
 /**
  * @brief registration parameter for simple value statistics
@@ -145,7 +145,7 @@ int procstat_create_control(struct procstat_context *context,
 			    struct procstat_control_handle *descriptor);
 
 #define DEFINE_PROCSTAT_FORMATTER(__type, __fmt, __fmt_name)\
-static inline ssize_t procstat_format_ ## __type ##_## __fmt_name(void *object, uint64_t arg, char *buffer, size_t len, off_t offset)\
+static inline ssize_t procstat_format_ ## __type ##_## __fmt_name(void *object, uint64_t arg, char *buffer, size_t len)\
 {\
 	return snprintf(buffer, len, __fmt, *((__type *)object));\
 }\
@@ -181,7 +181,7 @@ DEFINE_PROCSTAT_SIMPLE_ATTRIBUTE(u64);
  * get function to fetch object value
  */
 #define DEFINE_PROCSTAT_CUSTOM_FORMATTER(name, getter_function, __type, __fmt)\
-static inline ssize_t procstat_format_ ## __type ##_## name(void *object, uint64_t arg, char *buffer, size_t length, off_t offset)\
+static inline ssize_t procstat_format_ ## __type ##_## name(void *object, uint64_t arg, char *buffer, size_t length)\
 {\
 	__type out;\
 	\
