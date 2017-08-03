@@ -808,9 +808,10 @@ static ssize_t series_u64_read(void *object, uint64_t arg, char *buffer, size_t 
 	uint64_t zero = 0;
 	uint64_t *data_ptr = NULL;
 	uint64_t data;
-	uint64_t count = series->count;
+	uint64_t count;
 
 	reset = __atomic_load_n(&series->reset, __ATOMIC_ACQUIRE);
+	count = *((volatile uint64_t *)&series->count);
 	switch (type) {
 	case SERIES_SUM:
 		data_ptr = (reset) ? &zero : &series->sum;
@@ -825,14 +826,14 @@ static ssize_t series_u64_read(void *object, uint64_t arg, char *buffer, size_t 
 		data_ptr = (reset) ? &zero : &series->mean;
 		goto write_var;
 	case SERIES_MIN:
-		if (!series->count || reset)
+		if (!count || reset)
 			goto write_nan;
 
 		data_ptr = &series->min;
 		goto write_var;
 
 	case SERIES_MAX:
-		if (!series->count || reset)
+		if (!count || reset)
 			goto write_nan;
 
 		data_ptr = &series->max;
