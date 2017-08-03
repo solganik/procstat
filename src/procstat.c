@@ -887,8 +887,6 @@ static int reset_u64_series(void *object, const char *buffer, size_t length, off
 	uint32_t control;
 
 	control = strtoul(buffer, NULL, 10);
-	if (errno)
-		return errno;
 	if (control != 1)
 		return EINVAL;
 
