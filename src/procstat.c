@@ -769,6 +769,7 @@ void procstat_u64_series_add_point(struct procstat_series_u64 *series, uint64_t 
 		series->mean = 0;
 		series->aggregated_variance = 0;
 		series->min = ULLONG_MAX;
+		series->max = 0;
 		__atomic_store_n(&series->reset, 0, __ATOMIC_RELEASE);
 	}
 
