@@ -407,10 +407,17 @@ static bool allowed_open(struct procstat_item *item, struct fuse_file_info *fi)
 	return (((fi->flags & 3) == O_RDONLY || item_type_control(item)));
 }
 
+#define READ_BUFFER_SIZE 100
+struct read_struct {
+	ssize_t size;
+	char buffer[READ_BUFFER_SIZE];
+};
+
 static void fuse_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 {
 	struct procstat_context *context = request_context(req);
 	struct procstat_item *item;
+	struct read_struct *read_buffer;
 
 	pthread_mutex_lock(&context->global_lock);
 	item = (struct procstat_item *)(ino);
@@ -429,37 +436,46 @@ static void fuse_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 
 	pthread_mutex_unlock(&context->global_lock);
 
+	if (item_type_control(item)) {
+		fi->fh = 0;
+		fuse_reply_open(req, fi);
+		return;
+	}
+
+	read_buffer = malloc(sizeof(struct read_struct));
+	if (!read_buffer) {
+		fuse_reply_err(req, ENOMEM);
+		return;
+	}
+
+	fi->fh = (uint64_t)read_buffer;
+
 	/* we dont know size of file in advance so use directio*/
 	fi->direct_io = true;
 	fuse_reply_open(req, fi);
 }
 
-#define READ_BUFFER_SIZE 100
 static void fuse_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi)
 {
-	char buffer[READ_BUFFER_SIZE];
 	struct procstat_item *item = (struct procstat_item *)ino;
+	struct read_struct *read_buffer = (struct read_struct *)fi->fh;
 	struct procstat_file *file;
-	int len_to_read = MIN((int)size, READ_BUFFER_SIZE);
-	int bytes_written;
-	size_t  result_size;
 
-	/* control file is always empty */
 	if (item_type_control(item)) {
 		fuse_reply_buf(req, NULL, 0);
 		return;
 	}
 
 	file = fuse_inode_to_file(ino);
-	bytes_written = file->writer(file->private, file->arg, buffer, len_to_read, off);
-	if (bytes_written < 0) {
-		fuse_reply_err(req, EIO);
+	if (off == 0)
+		read_buffer->size = file->writer(file->private, file->arg, read_buffer->buffer, READ_BUFFER_SIZE, 0);
+
+	if (off >= read_buffer->size) {
+		fuse_reply_buf(req, NULL, 0);
 		return;
 	}
 
-	/* Currently only support stats to 100 bytes .. FIXME: support longer stats */
-	result_size = (off > bytes_written) ? 0 : MIN(bytes_written - off, len_to_read);
-	fuse_reply_buf(req, (char *)buffer + off, result_size);
+	fuse_reply_buf(req, (char *)read_buffer->buffer + off, read_buffer->size - off);
 }
 
 static bool valid_filename(const char *name)
@@ -1066,6 +1082,13 @@ void fuse_setattr(fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set,
 	fuse_reply_attr(req, &stat, 1.0);
 }
 
+void fuse_release(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
+{
+	void *object = fi->fh;
+
+	free(object);
+}
+
 static struct fuse_lowlevel_ops fops = {
 	.read = fuse_read,
 	.forget = fuse_forget,
@@ -1075,7 +1098,8 @@ static struct fuse_lowlevel_ops fops = {
 	.readdir = fuse_readdir,
 	.open = fuse_open,
 	.write = fuse_write,
-	.setattr = fuse_setattr
+	.setattr = fuse_setattr,
+	.release = fuse_release
 };
 
 #define ROOT_DIR_NAME "."
