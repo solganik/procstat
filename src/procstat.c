@@ -1205,6 +1205,7 @@ void procstat_histogram_u32_add_point(struct procstat_histogram_u32 *series, uin
 {
 	++series->count;
 	series->sum += value;
+	series->last = value;
 
 	procstat_hist_add_point(series->histogram, value);
 }
