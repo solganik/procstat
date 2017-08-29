@@ -275,13 +275,13 @@ typedef void (*percentiles_calculator)(uint32_t *histogram,
 
 #define MAX_SUPPORTED_PERCENTILE 20
 struct procstat_histogram_u32 {
-	uint64_t 			  sum;
-	uint64_t 			  count;
-	uint64_t 			  last;
-	int	 			  npercentile;
-	struct procstat_percentile_result percentile[MAX_SUPPORTED_PERCENTILE];
-	uint32_t 			  *histogram;
-	percentiles_calculator 		  compute_cb;
+	uint64_t				sum;
+	uint64_t				count;
+	uint64_t				last;
+	int					npercentile;
+	struct procstat_percentile_result	percentile[MAX_SUPPORTED_PERCENTILE];
+	uint32_t				*histogram;
+	percentiles_calculator			compute_cb;
 };
 
 /**
