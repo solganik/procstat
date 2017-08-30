@@ -278,6 +278,7 @@ struct procstat_histogram_u32 {
 	uint64_t				sum;
 	uint64_t				count;
 	uint64_t				last;
+	unsigned                                reset;
 	int					npercentile;
 	struct procstat_percentile_result	percentile[MAX_SUPPORTED_PERCENTILE];
 	uint32_t				*histogram;

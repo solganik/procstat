@@ -1195,14 +1195,33 @@ void procstat_loop(struct procstat_context *context)
 static ssize_t procstat_fmt_u32_percentile(void *object, uint64_t arg, char *buffer, size_t length)
 {
 	struct procstat_histogram_u32 *series = object;
+	unsigned reset;
+	uint32_t zero = 0;
+	uint32_t *data_ptr = NULL;
 
-	series->compute_cb(series->histogram, series->count, series->percentile, series->npercentile);
-	return procstat_format_u32_decimal(&series->percentile[arg].value, 0, buffer, length);
+	reset = __atomic_load_n(&series->reset, __ATOMIC_ACQUIRE);
+	if (reset) {
+		data_ptr = &zero;
+	} else {
+		series->compute_cb(series->histogram, series->count, series->percentile, series->npercentile);
+		data_ptr = &series->percentile[arg].value;
+	}
+	return procstat_format_u32_decimal(data_ptr, 0, buffer, length);
 }
 
 
 void procstat_histogram_u32_add_point(struct procstat_histogram_u32 *series, uint32_t value)
 {
+	unsigned reset;
+
+	reset = __atomic_load_n(&series->reset, __ATOMIC_RELAXED);
+	if (reset) {
+		series->count = 0;
+		series->sum = 0;
+		series->last = 0;
+		memset(series->histogram, 0, PROCSTAT_PERCENTILE_ARR_NR * sizeof(*series->histogram));
+		__atomic_store_n(&series->reset, 0, __ATOMIC_RELEASE);
+	}
 	++series->count;
 	series->sum += value;
 	series->last = value;
@@ -1210,14 +1229,63 @@ void procstat_histogram_u32_add_point(struct procstat_histogram_u32 *series, uin
 	procstat_hist_add_point(series->histogram, value);
 }
 
-static ssize_t write_histogram_u32_average(void *data, uint64_t arg, char *buffer, size_t len)
+enum histogram_u32_series_type{
+	HISTOGRAM_SUM = 0,
+	HISTOGRAM_COUNT = 1,
+	HISTOGRAM_LAST = 2,
+	HISTOGRAM_AVG = 3,
+};
+
+static ssize_t histogram_u32_series_read(void *object, uint64_t arg, char *buffer, size_t len)
 {
-	struct procstat_histogram_u32 *series = (struct procstat_histogram_u32 *)data;
+	struct procstat_histogram_u32 *series = object;
+	enum histogram_u32_series_type type = arg;
+	unsigned reset;
+	uint64_t zero = 0;
+	uint64_t *data_ptr = NULL;
+	uint64_t data;
+	uint64_t count;
 
-	if (!series->count)
-		return snprintf(buffer, len, "nan");
+	reset = __atomic_load_n(&series->reset, __ATOMIC_ACQUIRE);
+	count = *((volatile uint64_t *)&series->count);
+	switch (type) {
+	case HISTOGRAM_SUM:
+		data_ptr = (reset) ? &zero : &series->sum;
+		goto write_var;
+	case HISTOGRAM_COUNT:
+		data_ptr = (reset) ? &zero : &series->count;
+		goto write_var;
+	case HISTOGRAM_LAST:
+		data_ptr = (reset) ? &zero : &series->last;
+		goto write_var;
+	case HISTOGRAM_AVG:
+		if (!count || reset)
+			goto write_nan;
 
-	return snprintf(buffer, len, "%lu\n", series->sum / series->count);
+		data = series->sum / count;
+		data_ptr = &data;
+		goto write_var;
+	default:
+		return -1;
+	}
+write_nan:
+	return snprintf(buffer, len, "nan");
+write_var:
+	return procstat_format_u64_decimal(data_ptr, arg, buffer, len);
+}
+
+static int reset_histogram_u32_series(void *object, const char *buffer, size_t length, off_t offset)
+{
+	struct procstat_series *series_stat = object;
+	struct procstat_histogram_u32 *series = series_stat->private;
+	uint32_t control;
+
+	control = strtoul(buffer, NULL, 10);
+	if (control != 1)
+		return EINVAL;
+
+	__atomic_store_n(&series->reset, 1, __ATOMIC_RELAXED);
+	return 0;
 }
 
 int procstat_create_histogram_u32_series(struct procstat_context *context, struct procstat_item *parent,
@@ -1225,12 +1293,13 @@ int procstat_create_histogram_u32_series(struct procstat_context *context, struc
 {
 	int i;
 	struct procstat_series *series_stat;
+	struct procstat_control *control;
 	int error;
 	struct procstat_simple_handle descriptors[] = {
-		{"sum",    &series->sum, 0, procstat_format_u64_decimal},
-		{"count",  &series->count, 0, procstat_format_u64_decimal},
-		{"last",   &series->last, 0, procstat_format_u64_decimal},
-		{"avg",    series, 0, write_histogram_u32_average},
+		{"sum",    series, HISTOGRAM_SUM, histogram_u32_series_read},
+		{"count",  series, HISTOGRAM_COUNT, histogram_u32_series_read},
+		{"last",   series, HISTOGRAM_LAST, histogram_u32_series_read},
+		{"avg",    series, HISTOGRAM_AVG, histogram_u32_series_read},
 	};
 
 	parent = parent_or_root(context, parent);
@@ -1281,7 +1350,12 @@ int procstat_create_histogram_u32_series(struct procstat_context *context, struc
 		file->arg = i;
 	}
 
+	control = create_control_file(context, &series_stat->root, "reset", series_stat, reset_histogram_u32_series);
+	if (!control)
+		goto fail_remove_stat;
+
 	return 0;
+
 fail_remove_stat:
 	procstat_remove(context, &series_stat->root.base);
 	return -1;
