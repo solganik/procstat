@@ -314,7 +314,7 @@ void create_histogram(void)
 		procstat_histogram_u32_add_point(&series, i);
 	}
 
-	printf("Obsefve values\n");
+	printf("Observe values\n");
 	getchar();
 
 	procstat_percentile_calculate(series.histogram, series.count, series.percentile, 5);
@@ -324,8 +324,22 @@ void create_histogram(void)
 	assert(series.percentile[3].value == 987136);
 	assert(series.percentile[4].value == 1003520);
 
-	procstat_remove_by_name(context, NULL, "hist");
+	printf("Now reset Histogram, and observe zeroed values\n");
+	getchar();
 
+	printf("press enter to submit new values\n");
+	getchar();
+
+	for (i = 0; i < 1000000; ++i) {
+		procstat_histogram_u32_add_point(&series, i);
+	}
+
+	printf("Observe values\n");
+	getchar();
+
+	printf("removing histogram\n");
+
+	procstat_remove_by_name(context, NULL, "hist");
 }
 
 static int procstat_control_set_u64(void *object, const char *buffer, size_t length, off_t offset)
