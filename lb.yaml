@@ -1,3 +1,4 @@
 procstat:
   procstat:
-  - file://src
+    deps:
+    - file://src
