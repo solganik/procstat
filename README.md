@@ -13,10 +13,12 @@ existing text processing tools  such as *grep*, *awk* and others available to pe
 
 
 ## Installation
+```C
 mkdir build; cd build; cmake ../; make && sudo make install
+```
 
 ## Getting Started:
-In order to use **procstat** you need to *#include "procstat.h"* file in you executable. 
+In order to use **procstat** you need to *#include "procstat.h"* in your executable. 
 
 ```C
 #include <procstat.h>
