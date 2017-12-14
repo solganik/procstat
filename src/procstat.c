@@ -1087,6 +1087,7 @@ void fuse_release(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 	void *object = fi->fh;
 
 	free(object);
+	fuse_reply_err(req, 0);
 }
 
 static struct fuse_lowlevel_ops fops = {
