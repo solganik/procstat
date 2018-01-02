@@ -138,6 +138,17 @@ void procstat_remove(struct procstat_context *context, struct procstat_item *ite
  */
 int procstat_remove_by_name(struct procstat_context *context, struct procstat_item *parent, const char *name);
 
+/*
+ * @brief return an item with @name under @parent directory
+ * @context statistics context
+ * @parent directory under which to lookup an item with @name, in case parent is NULL
+ * 	    @name will be lookup under root directory
+ * @name of the item to lookup
+ * @return the found item NULL, in case of failure and errno will be set accordingly
+ */
+struct procstat_item *procstat_lookup_item(struct procstat_context *context,
+		struct procstat_item *parent, const char *name);
+
 /**
  * @brief creates counter, which will be exposed as @name under @parent dictory.
  * @return 0 on success, -1  in case of failure and errno will be set accordingly

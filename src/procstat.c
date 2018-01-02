@@ -1373,3 +1373,20 @@ int procstat_create_control(struct procstat_context *context, struct procstat_it
 		return -1;
 	return 0;
 }
+
+struct procstat_item *procstat_lookup_item(struct procstat_context *context,
+		struct procstat_item *parent, const char *name)
+{
+	struct procstat_item *item;
+
+	parent = parent_or_root(context, parent);
+	pthread_mutex_lock(&context->global_lock);
+
+	item = lookup_item_locked((struct procstat_directory *)parent,
+				  name, string_hash(name));
+
+	pthread_mutex_unlock(&context->global_lock);
+
+	return item;
+}
+
