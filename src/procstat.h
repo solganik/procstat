@@ -128,6 +128,17 @@ struct procstat_item *procstat_create_directory(struct procstat_context *context
 						const char *name);
 
 /**
+ * @brief removes statistics item previosly created with any of creation methods
+ */
+void procstat_remove(struct procstat_context *context, struct procstat_item *item);
+
+/**
+ * @brief searches for @name item under @parent directory and removes it
+ * @return 0 in case of success or error code
+ */
+int procstat_remove_by_name(struct procstat_context *context, struct procstat_item *parent, const char *name);
+
+/**
  * @brief creates counter, which will be exposed as @name under @parent dictory.
  * @return 0 on success, -1  in case of failure and errno will be set accordingly
  */
@@ -304,19 +315,6 @@ int procstat_create_multiple_u64_series(struct procstat_context *context,
  * @brief add points to series statistics
  */
 void procstat_u64_series_add_point(struct procstat_series_u64 *series, uint64_t value);
-
-/**
- * @brief removes statistics item previosly created with any of creation methods
- */
-void procstat_remove(struct procstat_context *context, struct procstat_item *item);
-
-/**
- * @brief searches for @name item under @parent directory and removes it
- * @return 0 in case of success or error code
- */
-int procstat_remove_by_name(struct procstat_context *context, struct procstat_item *parent, const char *name);
-
-
 
 int procstat_create_histogram_u32_series(struct procstat_context *context, struct procstat_item *parent,
 					 const char *name, struct procstat_histogram_u32 *series);
