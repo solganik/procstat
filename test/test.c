@@ -280,6 +280,21 @@ static void test_create_multiple_dirs_and_files(struct procstat_item *root, uint
 	getchar();
 	inc_values_32(values_32);
 
+	printf("Lookup directory named outer-0 under root\n");
+	item = procstat_lookup_item(context, root, "outer-0");
+	assert(item);
+	printf("Found directory outer-0!\n\n");
+
+	printf("Lookup directory named inner-3 under outer-0\n");
+	item = procstat_lookup_item(context, item, "inner-3");
+	assert(item);
+	printf("Found directory inner-3!\n\n");
+
+	printf("Lookup file named value-6 under inner-3\n");
+	item = procstat_lookup_item(context, item, "value-6");
+	assert(item);
+	printf("Found file value-6!\n\n");
+
 	printf("Delete several directories outer-0s\n");
 
 	procstat_remove_by_name(context, root, "outer-0");
