@@ -310,6 +310,14 @@ void not_create_dir_with_slash()
 	assert(!item1);
 }
 
+void test_not_create_invalid_filename(void)
+{
+	u64 dummy;
+	int error;
+
+	error = procstat_create_u64(context, NULL, "value_90%", &dummy);
+	assert(error);
+}
 
 void create_histogram(void)
 {
@@ -416,6 +424,7 @@ int main(int argc, char **argv) {
 	pthread_create(&inc_x_thread, NULL, fuse_loop, context);
 	not_create_dir_with_slash();
 	test_create_dirs(context);
+	test_not_create_invalid_filename();
 	test_create_multiple_dirs_and_files(NULL, values_32);
 	create_multiple_simple_stats(NULL, &values_32[0], &values_64[0], &values_16[0]);
 	create_multiple_start_end_stats(NULL);
