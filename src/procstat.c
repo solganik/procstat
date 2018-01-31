@@ -755,11 +755,11 @@ int procstat_create_simple(struct procstat_context *context,
 
 		file = create_file(context, (struct procstat_directory *)parent,
 				   descriptor->name, descriptor->object, descriptor->fmt);
-		file->arg = descriptor->arg;
 		if (!file) {
 			--i;
 			goto error_release;
 		}
+		file->arg = descriptor->arg;
 	}
 	return 0;
 error_release:
