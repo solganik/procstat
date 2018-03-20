@@ -358,6 +358,8 @@ static void fuse_readdir(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
 		size_t entry_size;
 		struct stat stat;
 
+		if (!item_registered(iter))
+			continue;
 		memset(&stat, 0, sizeof(stat));
 		fname = procstat_item_name(iter);
 		fill_item_stats(context, iter, &stat);
