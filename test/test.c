@@ -295,9 +295,11 @@ static void test_create_multiple_dirs_and_files(struct procstat_item *root, uint
 	assert(item);
 	printf("Found file value-6!\n\n");
 
-	printf("Delete several directories outer-0s\n");
-
+	printf("Delete several directories outer-0s .. press any key before delete \n");
+	getchar();
 	procstat_remove_by_name(context, root, "outer-0");
+	printf("Deleted outer-0 Watch values under outer-0 directory should not be here!!!\n");
+	getchar();
 	item = procstat_create_directory(context, root, "outer-0");
 	assert(item);
 }
