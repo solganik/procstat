@@ -207,18 +207,6 @@ static void free_directory(struct procstat_directory *directory)
 	free_item(&directory->base);
 }
 
-
-static void fuse_forget(fuse_req_t req, fuse_ino_t ino, unsigned long nlookup)
-{
-	struct procstat_item *item = fuse_inode_to_item(request_context(req), ino);
-
-	assert(item->refcnt >= nlookup);
-	item->refcnt -= nlookup;
-	if (item->refcnt == 0)
-		free_item(item);
-	fuse_reply_none(req);
-}
-
 #define INODE_BLK_SIZE 4096
 static void fill_item_stats(struct procstat_context *context, struct procstat_item *item, struct stat *stat)
 {
@@ -272,11 +260,10 @@ static void fuse_lookup(fuse_req_t req, fuse_ino_t parent_inode, const char *nam
 		fuse_reply_err(req, ENOENT);
 		return;
 	}
-	++item->refcnt;
-	pthread_mutex_unlock(&context->global_lock);
 
 	fuse_entry.ino = (uintptr_t)item;
 	fill_item_stats(context, item, &fuse_entry.attr);
+	pthread_mutex_unlock(&context->global_lock);
 	fuse_reply_entry(req, &fuse_entry);
 }
 
@@ -313,7 +300,7 @@ static void fuse_opendir(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *
 		fuse_reply_err(req, ENOENT);
 		return;
 	}
-
+	++item->refcnt;
 	pthread_mutex_unlock(&context->global_lock);
 	fuse_reply_open(req, fi);
 }
@@ -452,6 +439,8 @@ static void fuse_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 
 	/* we dont know size of file in advance so use directio*/
 	fi->direct_io = true;
+
+	++item->refcnt;
 	fuse_reply_open(req, fi);
 }
 
@@ -1082,17 +1071,20 @@ void fuse_setattr(fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set,
 	fuse_reply_attr(req, &stat, 1.0);
 }
 
-void fuse_release(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
+static void fuse_release(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 {
-	void *object = fi->fh;
+	struct procstat_context *context = request_context(req);
+	struct procstat_item *item = fuse_inode_to_item(request_context(req), ino);
 
-	free(object);
+	pthread_mutex_lock(&context->global_lock);
+	if (--item->refcnt == 0)
+		free_item(item);
+	pthread_mutex_unlock(&context->global_lock);
 	fuse_reply_err(req, 0);
 }
 
 static struct fuse_lowlevel_ops fops = {
 	.read = fuse_read,
-	.forget = fuse_forget,
 	.lookup = fuse_lookup,
 	.getattr = fuse_getattr,
 	.opendir = fuse_opendir,
@@ -1100,7 +1092,8 @@ static struct fuse_lowlevel_ops fops = {
 	.open = fuse_open,
 	.write = fuse_write,
 	.setattr = fuse_setattr,
-	.release = fuse_release
+	.release = fuse_release,
+	.releasedir = fuse_release,
 };
 
 #define ROOT_DIR_NAME "."
