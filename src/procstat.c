@@ -60,6 +60,7 @@ enum {
 	STATS_ENTRY_CONTROL	     = 1 << 3
 };
 
+#define ATTRIBUTES_TIMEOUT_SEC (60.0 * 60)
 #define DNAME_INLINE_LEN 32
 struct procstat_dynamic_name {
 	unsigned zero:8;
@@ -262,6 +263,7 @@ static void fuse_lookup(fuse_req_t req, fuse_ino_t parent_inode, const char *nam
 	}
 
 	fuse_entry.ino = (uintptr_t)item;
+	fuse_entry.attr_timeout = ATTRIBUTES_TIMEOUT_SEC;
 	fill_item_stats(context, item, &fuse_entry.attr);
 	pthread_mutex_unlock(&context->global_lock);
 	fuse_reply_entry(req, &fuse_entry);
@@ -284,7 +286,7 @@ static void fuse_getattr(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *
 
 	fill_item_stats(context, item, &stat);
 	pthread_mutex_unlock(&context->global_lock);
-	fuse_reply_attr(req, &stat, 1.0);
+	fuse_reply_attr(req, &stat, ATTRIBUTES_TIMEOUT_SEC);
 }
 
 static void fuse_opendir(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
