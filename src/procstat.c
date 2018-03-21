@@ -429,6 +429,7 @@ static void fuse_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 
 	if (item_type_control(item)) {
 		fi->fh = 0;
+		++item->refcnt;
 		fuse_reply_open(req, fi);
 		return;
 	}
