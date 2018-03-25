@@ -186,6 +186,7 @@ DEFINE_PROCSTAT_FORMATTER(u64, "%lx\n", hex);
 DEFINE_PROCSTAT_FORMATTER(u64, "0x%lx\n", address);
 DEFINE_PROCSTAT_FORMATTER(u32, "%u\n", decimal);
 DEFINE_PROCSTAT_FORMATTER(u32, "%x\n", hex);
+DEFINE_PROCSTAT_FORMATTER(int, "%d\n", decimal);
 
 #define DEFINE_PROCSTAT_SIMPLE_ATTRIBUTE(__type)\
 static inline int procstat_create_ ## __type(struct procstat_context *context, struct procstat_item *parent, const char *name, __type *object)\
@@ -197,6 +198,7 @@ static inline int procstat_create_ ## __type(struct procstat_context *context, s
 
 DEFINE_PROCSTAT_SIMPLE_ATTRIBUTE(u32);
 DEFINE_PROCSTAT_SIMPLE_ATTRIBUTE(u64);
+DEFINE_PROCSTAT_SIMPLE_ATTRIBUTE(int);
 
 /**
  * @brief defines formatter with getter method. This can be used to provide standard POD formatting with custom
