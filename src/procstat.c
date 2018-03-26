@@ -89,7 +89,7 @@ struct procstat_file {
 	struct procstat_item	base;
 	void  	    		*private;
 	uint64_t		arg;
-	procstats_formatter  	writer;
+	procstats_formatter  	fmt;
 };
 
 struct procstat_control {
@@ -462,7 +462,7 @@ static void fuse_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, st
 
 	file = fuse_inode_to_file(ino);
 	if (off == 0)
-		read_buffer->size = file->writer(file->private, file->arg, read_buffer->buffer, READ_BUFFER_SIZE);
+		read_buffer->size = file->fmt(file->private, file->arg, read_buffer->buffer, READ_BUFFER_SIZE);
 
 	if (off >= read_buffer->size) {
 		fuse_reply_buf(req, NULL, 0);
@@ -500,7 +500,7 @@ static void init_item(struct procstat_item *item, const char *name)
 
 static struct procstat_file *allocate_file_item(const char *name,
 					   	void *priv,
-						procstats_formatter callback)
+						procstats_formatter fmt)
 {
 	struct procstat_file *file;
 
@@ -510,7 +510,7 @@ static struct procstat_file *allocate_file_item(const char *name,
 
 	init_item(&file->base, name);
 	file->private = priv;
-	file->writer = callback;
+	file->fmt = fmt;
 	return file;
 }
 
@@ -590,7 +590,7 @@ static struct procstat_item *parent_or_root(struct procstat_context *context, st
 static struct procstat_file *create_file(struct procstat_context *context,
 					 struct procstat_directory *parent,
 					 const char *name, void *item,
-					 procstats_formatter callback)
+					 procstats_formatter fmt)
 {
 	struct procstat_file *file;
 	int error;
@@ -600,7 +600,7 @@ static struct procstat_file *create_file(struct procstat_context *context,
 		return NULL;
 	}
 
-	file = allocate_file_item(name, item, callback);
+	file = allocate_file_item(name, item, fmt);
 	if (!file) {
 		errno = ENOMEM;
 		return NULL;
