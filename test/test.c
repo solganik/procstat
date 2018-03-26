@@ -405,6 +405,22 @@ void test_control(void)
 	procstat_remove(context, item);
 }
 
+
+void test_parameter(void)
+{
+	int value = 0;
+	int error;
+	error = procstat_create_int_parameter(context, NULL, "param", &value);
+	assert(!error);
+
+	printf("Write to control and read value");
+	getchar();
+	printf("Value is %d\n", value);
+	printf("press any key to continue\n");
+	getchar();
+	procstat_remove_by_name(context, NULL, "param");
+}
+
 int main(int argc, char **argv) {
 	struct procstat_item *item;
 	uint32_t values_32[10];
@@ -424,6 +440,7 @@ int main(int argc, char **argv) {
 
 	pthread_t inc_x_thread;
 	pthread_create(&inc_x_thread, NULL, fuse_loop, context);
+	test_parameter();
 	not_create_dir_with_slash();
 	test_create_dirs(context);
 	test_not_create_invalid_filename();
