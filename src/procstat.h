@@ -71,20 +71,6 @@ struct procstat_simple_handle {
 	procstats_formatter writer;
 };
 
-/**
- * control callback is called when writing somehing to control file
- */
-typedef int (*procstat_control_cb)(void *object, const char *buffer, size_t length, off_t offset);
-
-/**
- * @brief handle to register control interface, via which values can be written to procstat
- * and @callback will be deliveed to application
- */
-struct procstat_control_handle {
-	const char	    *name;
-	void 		    *object;
-	procstat_control_cb callback;
-};
 
 /**
  * @brief create statstics context and mount it on running machine under @mountpoint.
@@ -159,13 +145,7 @@ int procstat_create_simple(struct procstat_context *context,
 			   struct procstat_simple_handle *descriptors,
 			   size_t descriptors_len);
 
-/**
- * @brief creates control file write to which results in callback
- * to application
- */
-int procstat_create_control(struct procstat_context *context,
-			    struct procstat_item *parent,
-			    struct procstat_control_handle *descriptor);
+
 
 #define DEFINE_PROCSTAT_FORMATTER(__type, __fmt, __fmt_name)\
 static inline ssize_t procstat_format_ ## __type ##_## __fmt_name(void *object, uint64_t arg, char *buffer, size_t len)\

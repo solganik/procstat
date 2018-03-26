@@ -367,7 +367,7 @@ void create_histogram(void)
 	procstat_remove_by_name(context, NULL, "hist");
 }
 
-static int procstat_control_set_u64(void *object, const char *buffer, size_t length, off_t offset)
+static ssize_t procstat_control_set_u64(void *object, uint64_t arg, char *buffer, size_t length)
 {
 	uint64_t *ptr = object;
 	uint64_t value;
@@ -384,7 +384,7 @@ void test_control(void)
 {
 	struct procstat_item *item;
 	int error;
-	struct procstat_control_handle control = {.name="set", .callback = procstat_control_set_u64};
+	struct procstat_simple_handle control = {.name="set", .writer = procstat_control_set_u64};
 
 	item = procstat_create_directory(context, procstat_root(context), "with_control");
 	assert(item);
@@ -395,7 +395,7 @@ void test_control(void)
 
 	control.object = &counter;
 
-	error = procstat_create_control(context, item, &control);
+	error = procstat_create_simple(context, item, &control, 1);
 	assert(!error);
 
 	printf("Write to control and read value");
