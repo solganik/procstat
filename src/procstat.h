@@ -68,6 +68,7 @@ struct procstat_simple_handle {
 	void 	 	    *object;
 	uint64_t 	    arg;
 	procstats_formatter fmt;
+	procstats_formatter writer;
 };
 
 /**
@@ -172,6 +173,13 @@ static inline ssize_t procstat_format_ ## __type ##_## __fmt_name(void *object, 
 	return snprintf(buffer, len, __fmt, *((__type *)object));\
 }\
 
+#define DEFINE_PROCSTAT_WRITER(__type, __fmt, __fmt_name)\
+static inline ssize_t procstat_write_ ## __type ##_## __fmt_name(void *object, uint64_t arg, char *buffer, size_t size)\
+{\
+	return sscanf(buffer, __fmt, ((__type *)object));\
+}\
+
+
 #ifndef u64
 #define u64 uint64_t
 #endif
@@ -188,10 +196,14 @@ DEFINE_PROCSTAT_FORMATTER(u32, "%u\n", decimal);
 DEFINE_PROCSTAT_FORMATTER(u32, "%x\n", hex);
 DEFINE_PROCSTAT_FORMATTER(int, "%d\n", decimal);
 
+DEFINE_PROCSTAT_WRITER(u64, "%lu\n", decimal);
+DEFINE_PROCSTAT_WRITER(u32, "%u\n", decimal);
+DEFINE_PROCSTAT_WRITER(int, "%d\n", decimal);
+
 #define DEFINE_PROCSTAT_SIMPLE_ATTRIBUTE(__type)\
 static inline int procstat_create_ ## __type(struct procstat_context *context, struct procstat_item *parent, const char *name, __type *object)\
 {\
-	struct procstat_simple_handle descriptor = {name, object, 0UL, procstat_format_ ## __type ## _decimal};\
+	struct procstat_simple_handle descriptor = {name, object, 0UL, procstat_format_ ## __type ## _decimal, NULL};\
 	\
 	return procstat_create_simple(context, parent, &descriptor, 1);\
 }\
@@ -200,6 +212,18 @@ DEFINE_PROCSTAT_SIMPLE_ATTRIBUTE(u32);
 DEFINE_PROCSTAT_SIMPLE_ATTRIBUTE(u64);
 DEFINE_PROCSTAT_SIMPLE_ATTRIBUTE(int);
 
+
+#define DEFINE_PROCSTAT_SIMPLE_PARAMETER(__type)\
+static inline int procstat_create_ ## __type ## _parameter(struct procstat_context *context, struct procstat_item *parent, const char *name, __type *object)\
+{\
+	struct procstat_simple_handle descriptor = {name, object, 0UL, procstat_format_ ## __type ## _decimal, procstat_write_ ## __type ## _decimal};\
+	\
+	return procstat_create_simple(context, parent, &descriptor, 1);\
+}\
+
+DEFINE_PROCSTAT_SIMPLE_PARAMETER(int);
+DEFINE_PROCSTAT_SIMPLE_PARAMETER(u32);
+DEFINE_PROCSTAT_SIMPLE_PARAMETER(u64);
 /**
  * @brief defines formatter with getter method. This can be used to provide standard POD formatting with custom
  * get function to fetch object value

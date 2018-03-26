@@ -90,6 +90,7 @@ struct procstat_file {
 	void  	    		*private;
 	uint64_t		arg;
 	procstats_formatter  	fmt;
+	procstats_formatter  	writer;
 };
 
 struct procstat_control {
@@ -220,7 +221,19 @@ static void fill_item_stats(struct procstat_context *context, struct procstat_it
 		stat->st_nlink = root_directory(context, (struct procstat_directory *)item) ? 2 : 1;
 		return;
 	}
-	stat->st_mode = S_IFREG | ((item->flags & STATS_ENTRY_CONTROL) ? 0666 :  0444);
+
+	stat->st_mode = S_IFREG;
+	if (item_type_control(item)) {
+		stat->st_mode |=  0666;
+	} else {
+		struct procstat_file *file = container_of(item, struct procstat_file, base);
+
+		if (file->fmt)
+			stat->st_mode |= 0444;
+		if (file->writer)
+			stat->st_mode |= 0222;
+	}
+
 	stat->st_nlink = 1;
 	stat->st_size = 0;
 	stat->st_blocks = 0;
@@ -313,17 +326,32 @@ static void fuse_write(fuse_req_t req, fuse_ino_t ino, const char *buf,
 	int error;
 	struct procstat_control *control = (struct procstat_control *)ino;
 	struct procstat_item *item = (struct procstat_item *)ino;
+	struct procstat_file *file;
+	int num_objects;
 
-	if (!item_type_control(item)) {
+
+	if (item_type_control(item)) {
+		error = control->callback(control->private, buf, size, off);
+		if (!error)
+			fuse_reply_write(req, size);
+		else
+			fuse_reply_err(req, error);
+		return;
+	}
+
+	file = fuse_inode_to_file(ino);
+	if (!file->writer) {
 		fuse_reply_err(req, EIO);
 		return;
 	}
 
-	error = control->callback(control->private, buf, size, off);
-	if (!error)
+	num_objects = file->writer(file->private, file->arg, (char *)buf, size);
+	/* we currently only support single format parameter */
+	if (num_objects == 1)
 		fuse_reply_write(req, size);
 	else
-		fuse_reply_err(req, error);
+		fuse_reply_err(req, EINVAL);
+	return;
 }
 
 #define DEFAULT_BUFER_SIZE 1024
@@ -394,8 +422,18 @@ done:
 
 static bool allowed_open(struct procstat_item *item, struct fuse_file_info *fi)
 {
+	struct procstat_file *file;
 	/* non control items can be only opened as readonly */
-	return (((fi->flags & 3) == O_RDONLY || item_type_control(item)));
+	if ((fi->flags & 3) == O_RDONLY)
+		return true;
+
+	if (item_type_control(item))
+		return true;
+
+	file = container_of(item, struct procstat_file, base);
+	if (file->writer)
+		return true;
+	return false;
 }
 
 #define READ_BUFFER_SIZE 100
@@ -500,7 +538,8 @@ static void init_item(struct procstat_item *item, const char *name)
 
 static struct procstat_file *allocate_file_item(const char *name,
 					   	void *priv,
-						procstats_formatter fmt)
+						procstats_formatter fmt,
+						procstats_formatter writer)
 {
 	struct procstat_file *file;
 
@@ -511,6 +550,7 @@ static struct procstat_file *allocate_file_item(const char *name,
 	init_item(&file->base, name);
 	file->private = priv;
 	file->fmt = fmt;
+	file->writer = writer;
 	return file;
 }
 
@@ -590,7 +630,7 @@ static struct procstat_item *parent_or_root(struct procstat_context *context, st
 static struct procstat_file *create_file(struct procstat_context *context,
 					 struct procstat_directory *parent,
 					 const char *name, void *item,
-					 procstats_formatter fmt)
+					 procstats_formatter fmt, procstats_formatter writer)
 {
 	struct procstat_file *file;
 	int error;
@@ -600,7 +640,7 @@ static struct procstat_file *create_file(struct procstat_context *context,
 		return NULL;
 	}
 
-	file = allocate_file_item(name, item, fmt);
+	file = allocate_file_item(name, item, fmt, writer);
 	if (!file) {
 		errno = ENOMEM;
 		return NULL;
@@ -748,7 +788,8 @@ int procstat_create_simple(struct procstat_context *context,
 		struct procstat_simple_handle *descriptor = &descriptors[i];
 
 		file = create_file(context, (struct procstat_directory *)parent,
-				   descriptor->name, descriptor->object, descriptor->fmt);
+				   descriptor->name, descriptor->object,
+				   descriptor->fmt, descriptor->writer);
 		if (!file) {
 			--i;
 			goto error_release;
@@ -1005,11 +1046,11 @@ int procstat_create_start_end(struct procstat_context *context,
 			goto error_release;
 		}
 
-		file = create_file(context, directory, "start", descriptor->start, descriptor->fmt);
+		file = create_file(context, directory, "start", descriptor->start, descriptor->fmt, NULL);
 		if (!file)
 			goto error_release;
 
-		file = create_file(context, directory, "end", descriptor->end, descriptor->fmt);
+		file = create_file(context, directory, "end", descriptor->end, descriptor->fmt, NULL);
 		if (!file) {
 			goto error_release;
 		}
@@ -1058,7 +1099,7 @@ void fuse_setattr(fuse_req_t req, fuse_ino_t ino, struct stat *attr, int to_set,
 	}
 
 	/* only support control files  */
-	if (!item_type_control(item)) {
+	if (!item_type_control(item) && !fuse_inode_to_file(ino)->writer) {
 		pthread_mutex_unlock(&context->global_lock);
 		fuse_reply_err(req, EPERM);
 		return;
@@ -1343,7 +1384,7 @@ int procstat_create_histogram_u32_series(struct procstat_context *context, struc
 
 		sprintf(stat_name, "%.4g", series->percentile[i].fraction * 100);
 		file = create_file(context, (struct procstat_directory *)&series_stat->root.base,
-				   stat_name, series, procstat_fmt_u32_percentile);
+				   stat_name, series, procstat_fmt_u32_percentile, NULL);
 		if (!file)
 			goto fail_remove_stat;
 		file->arg = i;
