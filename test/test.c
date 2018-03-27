@@ -376,7 +376,7 @@ static ssize_t procstat_control_set_u64(void *object, uint64_t arg, char *buffer
 	if (errno)
 		return errno;
 	*ptr = value;
-	return 0;
+	return 1;
 }
 
 
