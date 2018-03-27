@@ -869,7 +869,7 @@ static ssize_t reset_u64_series(void *object, uint64_t arg, char *buffer, size_t
 		return EINVAL;
 
 	__atomic_store_n(&series->reset, 1, __ATOMIC_RELAXED);
-	return 0;
+	return 1;
 }
 
 int procstat_create_u64_series(struct procstat_context *context, struct procstat_item *parent,
@@ -1253,7 +1253,7 @@ static ssize_t reset_histogram_u32_series(void *object, uint64_t arg, char *buff
 		return EINVAL;
 
 	__atomic_store_n(&series->reset, 1, __ATOMIC_RELAXED);
-	return 0;
+	return 1;
 }
 
 int procstat_create_histogram_u32_series(struct procstat_context *context, struct procstat_item *parent,
