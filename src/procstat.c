@@ -300,6 +300,7 @@ static void fuse_opendir(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *
 	}
 	++item->refcnt;
 	pthread_mutex_unlock(&context->global_lock);
+	fi->fh = 0;
 	fuse_reply_open(req, fi);
 }
 
@@ -1052,6 +1053,7 @@ static void fuse_release(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *
 	if (--item->refcnt == 0)
 		free_item(item);
 	pthread_mutex_unlock(&context->global_lock);
+	free((void *)fi->fh);
 	fuse_reply_err(req, 0);
 }
 
