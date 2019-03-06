@@ -35,6 +35,10 @@
 #ifndef _PROCSTAT_H_
 #define _PROCSTAT_H_
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <stdint.h>
 #include <linux/types.h>
 #include <stddef.h>
@@ -337,5 +341,9 @@ int procstat_create_histogram_u32_series(struct procstat_context *context, struc
 					 const char *name, struct procstat_histogram_u32 *series);
 
 void procstat_histogram_u32_add_point(struct procstat_histogram_u32 *series, uint32_t value);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
