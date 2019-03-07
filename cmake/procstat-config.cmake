@@ -9,7 +9,7 @@ find_path(Procstat_INCLUDE_DIR
   PATH_SUFFIXES "src"
 )
 
-find_library(Procstat_LIBRARY NAMES procstat PATHS "${PROCSTAT_BUILD}/lib")
+find_library(Procstat_LIBRARY NAMES libprocstat.a PATHS "${PROCSTAT_BUILD}/lib")
 
 lb_version(Procstat_VERSION procstat procstat)
 
