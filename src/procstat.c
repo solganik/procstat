@@ -1116,6 +1116,7 @@ struct procstat_context *procstat_create(const char *mountpoint)
 		goto free_stats;
 	}
 
+	fuse_opt_free_args(&args);
 	fuse_session_add_chan(context->session, channel);
 	return context;
 free_stats:
