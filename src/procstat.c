@@ -1074,8 +1074,8 @@ static struct fuse_lowlevel_ops fops = {
 struct procstat_context *procstat_create(const char *mountpoint)
 {
 	struct procstat_context *context;
-	char *argv[] = {(char *)"stats", (char *)"-o", (char *)"auto_unmount", (char *)mountpoint};
-	struct fuse_args args = FUSE_ARGS_INIT(ARRAY_SIZE(argv), argv);
+	char *argv[] = {(char *)"stats", (char *)"-o", (char *)"auto_unmount", (char *)mountpoint, NULL};
+	struct fuse_args args = FUSE_ARGS_INIT(ARRAY_SIZE(argv)-1, argv);
 	char *full_path_mountpoint;
 	int error;
 	struct fuse_chan *channel;
