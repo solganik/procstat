@@ -271,6 +271,12 @@ int procstat_create_start_end(struct procstat_context 	       *context,
 #define procstat_start_end_u64_handle(name, start_end)\
 	(struct procstat_start_end_handle){name, &start_end.start, &start_end.end, procstat_format_u64_decimal}
 
+struct reset_info {
+	uint64_t reset_interval;
+	uint64_t last_reset_time;
+	unsigned reset_flag;
+};
+
 /**
  * @brief registration parameter for series statistics. statistical analysis will be performed on values
  * submitted as series point. mean and variance will be calculated upon even point submittion
@@ -286,14 +292,14 @@ struct procstat_series_u64_handle {
 
 
 struct procstat_series_u64 {
-	uint64_t sum;
-	uint64_t count;
-	uint64_t min;
-	uint64_t max;
-	uint64_t last;
-	uint64_t mean;
-	uint64_t aggregated_variance;
-	unsigned reset;
+	uint64_t 		sum;
+	uint64_t 		count;
+	uint64_t 		min;
+	uint64_t 		max;
+	uint64_t 		last;
+	uint64_t 		mean;
+	uint64_t 		aggregated_variance;
+	struct reset_info 	reset;
 };
 
 
