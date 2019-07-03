@@ -806,35 +806,35 @@ static ssize_t series_u64_read(void *object, uint64_t arg, char *buffer, size_t 
 		goto write_var;
 	case SERIES_MIN:
 		if (!count || reset)
-			goto write_nan;
+			goto write_zero;
 
 		data_ptr = &series->min;
 		goto write_var;
 
 	case SERIES_MAX:
 		if (!count || reset)
-			goto write_nan;
+			goto write_zero;
 
 		data_ptr = &series->max;
 		goto write_var;
 	case SERIES_AVG:
 		if (!count || reset)
-			goto write_nan;
+			goto write_zero;
 
 		data = series->sum / count;
 		data_ptr = &data;
 		goto write_var;
 	case SERIES_STDEV:
 		if (count < 2 || reset)
-			goto write_nan;
+			goto write_zero;
 		data = series->aggregated_variance / (count - 1);
 		data_ptr = &data;
 		goto write_var;
 	default:
 		return -1;
 	}
-write_nan:
-	return snprintf(buffer, len, "nan");
+write_zero:
+	return snprintf(buffer, len, "0");
 write_var:
 	return procstat_format_u64_decimal(data_ptr, arg, buffer, len);
 
@@ -1229,7 +1229,7 @@ static ssize_t histogram_u32_series_read(void *object, uint64_t arg, char *buffe
 		goto write_var;
 	case HISTOGRAM_AVG:
 		if (!count || reset)
-			goto write_nan;
+			goto write_zero;
 
 		data = series->sum / count;
 		data_ptr = &data;
@@ -1237,8 +1237,8 @@ static ssize_t histogram_u32_series_read(void *object, uint64_t arg, char *buffe
 	default:
 		return -1;
 	}
-write_nan:
-	return snprintf(buffer, len, "nan");
+write_zero:
+	return snprintf(buffer, len, "0");
 write_var:
 	return procstat_format_u64_decimal(data_ptr, arg, buffer, len);
 }
