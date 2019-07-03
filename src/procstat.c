@@ -48,6 +48,7 @@
 #include <sys/param.h>
 #include <ctype.h>
 #include <stdlib.h>
+#include <time.h>
 
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof(*a))
@@ -731,25 +732,52 @@ error_release:
 	return -1;
 }
 
+bool is_reset(struct reset_info* reset)
+{
+	unsigned reset_requested = 0;
+	bool reset_interval_expired = false;
+	uint64_t reset_interval, time_since_last_reset;
+
+	struct timespec cur_time;
+	if (clock_gettime(CLOCK_REALTIME, &cur_time) == 0) {
+		time_since_last_reset = cur_time.tv_sec - reset->last_reset_time;
+		reset_interval = __atomic_load_n(&reset->reset_interval, __ATOMIC_RELAXED);
+		if ((reset_interval) && (time_since_last_reset > reset_interval)) {
+			reset_interval_expired = true;
+			reset->last_reset_time = cur_time.tv_sec;
+		}
+	}
+
+	if (reset_interval_expired == false) {
+		reset_requested = __atomic_load_n(&reset->reset_flag, __ATOMIC_RELAXED);
+	}
+
+	if (reset_interval_expired || reset_requested) {
+		return true;
+	} else {
+		return false;
+	}
+}
+
+void clear_values_series(struct procstat_series_u64 *series)
+{
+	series->count = 0;
+	series->sum = 0;
+	series->mean = 0;
+	series->aggregated_variance = 0;
+	series->min = ULLONG_MAX;
+	series->max = 0;
+	__atomic_store_n(&series->reset.reset_flag, 0, __ATOMIC_RELEASE);
+}
+
 void procstat_u64_series_add_point(struct procstat_series_u64 *series, uint64_t value)
 {
 	int64_t delta;
 	int64_t delta2;
 	int64_t avg_delta;
-	unsigned reset;
 
-	/* We dont care about ordering of reset with another thread
-	 * we dont care if because of some raise we will do 2 resets */
-	reset = __atomic_load_n(&series->reset, __ATOMIC_RELAXED);
-	if (reset) {
-		series->count = 0;
-		series->sum = 0;
-		series->mean = 0;
-		series->aggregated_variance = 0;
-		series->min = ULLONG_MAX;
-		series->max = 0;
-		__atomic_store_n(&series->reset, 0, __ATOMIC_RELEASE);
-	}
+	if (is_reset(&series->reset)) 
+		clear_values_series(series);
 
 	if (value < series->min)
 		series->min = value;
@@ -777,57 +805,54 @@ enum series_u64_type{
 	SERIES_AVG = 5,
 	SERIES_MEAN = 6,
 	SERIES_STDEV = 7,
+	SERIES_RESET_INTERVAL = 8,
 };
 
 static ssize_t series_u64_read(void *object, uint64_t arg, char *buffer, size_t len)
 {
 	struct procstat_series_u64 *series = object;
 	enum series_u64_type type = arg;
-	int reset;
-	uint64_t zero = 0;
 	uint64_t *data_ptr = NULL;
 	uint64_t data;
 	uint64_t count;
 
-	reset = __atomic_load_n(&series->reset, __ATOMIC_ACQUIRE);
+	if (is_reset(&series->reset))
+		clear_values_series(series);
+
 	count = *((volatile uint64_t *)&series->count);
 	switch (type) {
 	case SERIES_SUM:
-		data_ptr = (reset) ? &zero : &series->sum;
+		data_ptr = &series->sum;
 		goto write_var;
 	case SERIES_COUNT:
-		data_ptr = (reset) ? &zero : &series->count;
+		data_ptr = &series->count;
 		goto write_var;
 	case SERIES_LAST:
-		data_ptr = (reset) ? &zero : &series->last;
+		data_ptr = &series->last;
 		goto write_var;
 	case SERIES_MEAN:
-		data_ptr = (reset) ? &zero : &series->mean;
+		data_ptr = &series->mean;
 		goto write_var;
 	case SERIES_MIN:
-		if (!count || reset)
-			goto write_zero;
-
 		data_ptr = &series->min;
 		goto write_var;
-
 	case SERIES_MAX:
-		if (!count || reset)
-			goto write_zero;
-
 		data_ptr = &series->max;
 		goto write_var;
 	case SERIES_AVG:
-		if (!count || reset)
+		if (!count)
 			goto write_zero;
-
 		data = series->sum / count;
 		data_ptr = &data;
 		goto write_var;
 	case SERIES_STDEV:
-		if (count < 2 || reset)
+		if (count < 2)
 			goto write_zero;
 		data = series->aggregated_variance / (count - 1);
+		data_ptr = &data;
+		goto write_var;
+	case SERIES_RESET_INTERVAL:
+		data = series->reset.reset_interval;
 		data_ptr = &data;
 		goto write_var;
 	default:
@@ -845,14 +870,15 @@ static int register_u64_series_files(struct procstat_context *context,
 {
 	struct procstat_series_u64 *series = series_stat->private;
 	struct procstat_simple_handle descriptors[] = {
-			{"sum",    series, SERIES_SUM, series_u64_read},
-			{"count",  series, SERIES_COUNT, series_u64_read},
-			{"min",    series, SERIES_MIN, series_u64_read},
-			{"max",    series, SERIES_MAX, series_u64_read},
-			{"last",   series, SERIES_LAST, series_u64_read},
-			{"avg",    series, SERIES_AVG, series_u64_read},
-			{"mean",   series, SERIES_MEAN, series_u64_read},
-			{"stddev", series, SERIES_STDEV, series_u64_read}};
+			{"sum",    			series, SERIES_SUM, series_u64_read},
+			{"count",  			series, SERIES_COUNT, series_u64_read},
+			{"min",    			series, SERIES_MIN, series_u64_read},
+			{"max",    			series, SERIES_MAX, series_u64_read},
+			{"last",   			series, SERIES_LAST, series_u64_read},
+			{"avg",    			series, SERIES_AVG, series_u64_read},
+			{"mean",   			series, SERIES_MEAN, series_u64_read},
+			{"stddev", 			series, SERIES_STDEV, series_u64_read},
+			{"get_reset_interval_sec", 	series, SERIES_RESET_INTERVAL, series_u64_read}};
 
 
 	return procstat_create_simple(context, &series_stat->root.base, descriptors, ARRAY_SIZE(descriptors));
@@ -868,7 +894,21 @@ static ssize_t reset_u64_series(void *object, uint64_t arg, char *buffer, size_t
 	if (control != 1)
 		return EINVAL;
 
-	__atomic_store_n(&series->reset, 1, __ATOMIC_RELAXED);
+	__atomic_store_n(&series->reset.reset_flag, 1, __ATOMIC_RELAXED);
+	return 1;
+}
+
+static ssize_t set_reset_interval_u64_series(void *object, uint64_t arg, char *buffer, size_t length)
+{
+	struct procstat_series *series_stat = object;
+	struct procstat_series_u64 *series = series_stat->private;
+	int32_t control;
+
+	control = strtoul(buffer, NULL, 10);
+	if (control < 0)
+		return EINVAL;
+
+	__atomic_store_n(&series->reset.reset_interval, control, __ATOMIC_RELAXED);
 	return 1;
 }
 
@@ -876,7 +916,9 @@ int procstat_create_u64_series(struct procstat_context *context, struct procstat
 			       const char *name, struct procstat_series_u64 *series)
 {
 	struct procstat_series *series_stat;
-	struct procstat_simple_handle control = {.name = "reset", .writer = reset_u64_series};
+	struct procstat_simple_handle control[] = {
+		{.name = "reset", .writer = reset_u64_series},
+		{.name = "reset_interval_sec", .writer = set_reset_interval_u64_series}};
 	int error;
 
 	parent = parent_or_root(context, parent);
@@ -907,8 +949,18 @@ int procstat_create_u64_series(struct procstat_context *context, struct procstat
 		goto error_remove_stat;
 	}
 
-	control.object = series_stat;
-	error = procstat_create_simple(context, &series_stat->root.base, &control, 1);
+	struct timespec cur_time;
+	if (clock_gettime(CLOCK_REALTIME, &cur_time) == 0) {
+		series->reset.last_reset_time = cur_time.tv_sec;
+	} else {
+		series->reset.last_reset_time = 0;
+	}
+	series->reset.reset_flag = 0;
+	series->reset.reset_interval = 0;
+
+	control[0].object = series_stat;
+	control[1].object = series_stat;
+	error = procstat_create_simple(context, &series_stat->root.base, control, 2);
 	if (error)
 		goto error_remove_stat;
 	return 0;
