@@ -343,10 +343,14 @@ int procstat_create_multiple_u64_series(struct procstat_context *context,
  */
 void procstat_u64_series_add_point(struct procstat_series_u64 *series, uint64_t value);
 
+void procstat_u64_series_set_reset_interval(struct procstat_series_u64 *series, int reset_interval);
+
 int procstat_create_histogram_u32_series(struct procstat_context *context, struct procstat_item *parent,
 					 const char *name, struct procstat_histogram_u32 *series);
 
 void procstat_histogram_u32_add_point(struct procstat_histogram_u32 *series, uint32_t value);
+
+void procstat_histogram_u32_series_set_reset_interval(struct procstat_histogram_u32 *series, int reset_interval);
 
 #ifdef __cplusplus
 }

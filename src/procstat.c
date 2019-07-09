@@ -970,6 +970,11 @@ error_remove_stat:
 	return -1;
 }
 
+void procstat_u64_series_set_reset_interval(struct procstat_series_u64 *series, int reset_interval)
+{
+	series->reset.reset_interval = reset_interval;
+}
+
 int procstat_create_multiple_u64_series(struct procstat_context *context,
 					struct procstat_item *parent,
 					struct procstat_series_u64_handle *descriptors,
@@ -1416,6 +1421,11 @@ int procstat_create_histogram_u32_series(struct procstat_context *context, struc
 fail_remove_stat:
 	procstat_remove(context, &series_stat->root.base);
 	return -1;
+}
+
+void procstat_histogram_u32_series_set_reset_interval(struct procstat_histogram_u32 *series, int reset_interval)
+{
+	series->reset.reset_interval = reset_interval;
 }
 
 struct procstat_item *procstat_lookup_item(struct procstat_context *context,
