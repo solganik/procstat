@@ -271,6 +271,12 @@ int procstat_create_start_end(struct procstat_context 	       *context,
 #define procstat_start_end_u64_handle(name, start_end)\
 	(struct procstat_start_end_handle){name, &start_end.start, &start_end.end, procstat_format_u64_decimal}
 
+struct reset_info {
+	uint64_t reset_interval;
+	uint64_t last_reset_time;
+	unsigned reset_flag;
+};
+
 /**
  * @brief registration parameter for series statistics. statistical analysis will be performed on values
  * submitted as series point. mean and variance will be calculated upon even point submittion
@@ -286,14 +292,14 @@ struct procstat_series_u64_handle {
 
 
 struct procstat_series_u64 {
-	uint64_t sum;
-	uint64_t count;
-	uint64_t min;
-	uint64_t max;
-	uint64_t last;
-	uint64_t mean;
-	uint64_t aggregated_variance;
-	unsigned reset;
+	uint64_t 		sum;
+	uint64_t 		count;
+	uint64_t 		min;
+	uint64_t 		max;
+	uint64_t 		last;
+	uint64_t 		mean;
+	uint64_t 		aggregated_variance;
+	struct reset_info 	reset;
 };
 
 
@@ -307,14 +313,14 @@ typedef void (*percentiles_calculator)(uint32_t *histogram,
 
 #define MAX_SUPPORTED_PERCENTILE 20
 struct procstat_histogram_u32 {
-	uint64_t				sum;
-	uint64_t				count;
-	uint64_t				last;
-	unsigned                                reset;
-	int					npercentile;
+	uint64_t 				sum;
+	uint64_t 				count;
+	uint64_t 				last;
+	int 					npercentile;
 	struct procstat_percentile_result	percentile[MAX_SUPPORTED_PERCENTILE];
-	uint32_t				*histogram;
-	percentiles_calculator			compute_cb;
+	uint32_t 				*histogram;
+	percentiles_calculator 			compute_cb;
+	struct reset_info 			reset;
 };
 
 /**
@@ -337,10 +343,14 @@ int procstat_create_multiple_u64_series(struct procstat_context *context,
  */
 void procstat_u64_series_add_point(struct procstat_series_u64 *series, uint64_t value);
 
+void procstat_u64_series_set_reset_interval(struct procstat_series_u64 *series, int reset_interval);
+
 int procstat_create_histogram_u32_series(struct procstat_context *context, struct procstat_item *parent,
 					 const char *name, struct procstat_histogram_u32 *series);
 
 void procstat_histogram_u32_add_point(struct procstat_histogram_u32 *series, uint32_t value);
+
+void procstat_histogram_u32_series_set_reset_interval(struct procstat_histogram_u32 *series, int reset_interval);
 
 #ifdef __cplusplus
 }
