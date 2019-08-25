@@ -5,7 +5,7 @@ all: build
 ifeq ($(BUILD_TYPE), dev)
 CMAKE_BUILD_TYPE := Debug
 else
-CMAKE_BUILD_TYPE := Relese
+CMAKE_BUILD_TYPE := Release
 endif
 
 build_dir:
