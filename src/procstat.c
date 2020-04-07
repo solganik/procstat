@@ -414,24 +414,7 @@ static void fuse_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 	struct procstat_context *context = request_context(req);
 	struct procstat_item *item;
 	struct read_struct *read_buffer;
-
-	pthread_mutex_lock(&context->global_lock);
-	item = (struct procstat_item *)(ino);
-
-	if (!item_registered(item)) {
-		pthread_mutex_unlock(&context->global_lock);
-		fuse_reply_err(req, EACCES);
-		return;
-	}
-
-	if (!allowed_open(item, fi)) {
-		pthread_mutex_unlock(&context->global_lock);
-		fuse_reply_err(req, EACCES);
-		return;
-	}
-
-	pthread_mutex_unlock(&context->global_lock);
-
+	int ret = EACCES;
 
 	read_buffer = malloc(sizeof(struct read_struct));
 	if (!read_buffer) {
@@ -439,13 +422,31 @@ static void fuse_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 		return;
 	}
 
+	pthread_mutex_lock(&context->global_lock);
+	item = (struct procstat_item *)(ino);
+
+	if (!item_registered(item))
+		goto out_locked;
+
+	if (!allowed_open(item, fi))
+		goto out_locked;
+
 	fi->fh = (uint64_t)read_buffer;
 
 	/* we dont know size of file in advance so use directio*/
 	fi->direct_io = true;
 
 	++item->refcnt;
+
+	pthread_mutex_unlock(&context->global_lock);
 	fuse_reply_open(req, fi);
+
+	return;
+
+out_locked:
+	pthread_mutex_unlock(&context->global_lock);
+	free(read_buffer);
+	fuse_reply_err(req, ret);
 }
 
 static void fuse_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi)
