@@ -687,6 +687,7 @@ void procstat_remove(struct procstat_context *context, struct procstat_item *ite
 
 remove_item:
 	item->flags &= ~STATS_ENTRY_FLAG_REGISTERED;
+	list_del_init(&item->entry); /* Make it not discoverable */
 	item_put_locked(item);
 done:
 	pthread_mutex_unlock(&context->global_lock);
@@ -712,6 +713,7 @@ int procstat_remove_by_name(struct procstat_context *context,
 		return ENOENT;
 	}
 	item->flags &= ~STATS_ENTRY_FLAG_REGISTERED;
+	list_del_init(&item->entry); /* Make it not discoverable */
 	item_put_locked(item);
 	pthread_mutex_unlock(&context->global_lock);
 	return 0;
