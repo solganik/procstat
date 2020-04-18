@@ -260,10 +260,28 @@ static void fuse_lookup(fuse_req_t req, fuse_ino_t parent_inode, const char *nam
 	}
 
 	fuse_entry.ino = (uintptr_t)item;
+	item->refcnt++;
 	fuse_entry.attr_timeout = ATTRIBUTES_TIMEOUT_SEC;
 	fill_item_stats(context, item, &fuse_entry.attr);
 	pthread_mutex_unlock(&context->global_lock);
 	fuse_reply_entry(req, &fuse_entry);
+}
+
+static void item_put_locked(struct procstat_item *item);
+static void fuse_forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup) {
+	struct procstat_context *context = request_context(req);
+	struct procstat_item *item;
+
+	pthread_mutex_lock(&context->global_lock);
+	item = (struct procstat_item *)(ino);
+	if (nlookup >= item->refcnt) {
+		item->refcnt = 1;
+		item_put_locked(item);
+	} else {
+		item->refcnt -= nlookup;
+	}
+	pthread_mutex_unlock(&context->global_lock);
+	fuse_reply_none(req);
 }
 
 static void fuse_getattr(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
@@ -669,6 +687,7 @@ void procstat_remove(struct procstat_context *context, struct procstat_item *ite
 
 remove_item:
 	item->flags &= ~STATS_ENTRY_FLAG_REGISTERED;
+	list_del_init(&item->entry); /* Make it not discoverable */
 	item_put_locked(item);
 done:
 	pthread_mutex_unlock(&context->global_lock);
@@ -694,6 +713,7 @@ int procstat_remove_by_name(struct procstat_context *context,
 		return ENOENT;
 	}
 	item->flags &= ~STATS_ENTRY_FLAG_REGISTERED;
+	list_del_init(&item->entry); /* Make it not discoverable */
 	item_put_locked(item);
 	pthread_mutex_unlock(&context->global_lock);
 	return 0;
@@ -1118,6 +1138,7 @@ static void fuse_release(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *
 static struct fuse_lowlevel_ops fops = {
 	.read = fuse_read,
 	.lookup = fuse_lookup,
+	.forget = fuse_forget,
 	.getattr = fuse_getattr,
 	.opendir = fuse_opendir,
 	.readdir = fuse_readdir,
