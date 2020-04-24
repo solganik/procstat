@@ -1203,6 +1203,17 @@ free_stats:
 	return NULL;
 }
 
+void procstat_stop(struct procstat_context *context)
+{
+	struct fuse_session *session;
+
+	assert(context);
+	session = context->session;
+
+	if (session)
+		fuse_session_exit(session);
+}
+
 void procstat_destroy(struct procstat_context *context)
 {
 	struct fuse_session *session;
