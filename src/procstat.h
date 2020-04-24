@@ -85,6 +85,11 @@ struct procstat_simple_handle {
 struct procstat_context *procstat_create(const char *mountpoint);
 
 /**
+ * @brief signal the loop to exit
+ */
+void procstat_stop(struct procstat_context *context);
+
+/**
  * @brief unregister and destroy all registered statistics
  */
 void procstat_destroy(struct procstat_context *context);
