@@ -880,7 +880,7 @@ static ssize_t series_u64_read(void *object, uint64_t arg, char *buffer, size_t 
 		return -1;
 	}
 write_zero:
-	return snprintf(buffer, len, "0");
+	return snprintf(buffer, len, "0\n");
 write_var:
 	return procstat_format_u64_decimal(data_ptr, arg, buffer, len);
 
@@ -1335,7 +1335,7 @@ static ssize_t histogram_u32_series_read(void *object, uint64_t arg, char *buffe
 		return -1;
 	}
 write_zero:
-	return snprintf(buffer, len, "0");
+	return snprintf(buffer, len, "0\n");
 write_var:
 	return procstat_format_u64_decimal(data_ptr, arg, buffer, len);
 }
