@@ -474,14 +474,16 @@ struct out_stream {
 	char *buf;
 	size_t size;
 	size_t total;
+	unsigned lines;
+	unsigned discard_lines;
 };
 
-#define AGGR_EXTRA_BYTES 1024
+#define AGGR_EXTRA_BYTES 0
 
 struct aggregator_context {
 	struct list_head *current;
-	size_t discard_bytes; /* from the front of the current */
 	size_t off;
+	unsigned discard_lines; /* from the front of the current */
 };
 
 struct aggregator_struct {
@@ -494,27 +496,41 @@ struct aggregator_struct {
 static int out_item(struct out_stream *out, char *path, struct procstat_item *item)
 {
 	const char *fname;
-	int space = out->size - out->total;
 	int len;
 	int ret = 0;
 
 	fname = procstat_item_name(item);
 	if (!item_type_directory(item)) {
 		struct procstat_file *file = container_of(item, struct procstat_file, base);
+		int space = out->size - out->total;
+		size_t total = out->total;
 
 		if (!file->fmt)
 			return 0; /* skipping write-only files */
-		len = snprintf(&out->buf[out->total], space, "%s/%s:", path, fname);
-		out->total += len > space ? space : len;
+		if (out->discard_lines) {
+			--out->discard_lines;
+			/*
+			 * Count the discarded lines, so in case we run out of the buffer space
+			 * on the first root directory item, the new discard_lines value will
+			 * include the previous one and the number of newly generated lines.
+			 */
+			++out->lines;
+			return 0;
+		}
+		len = snprintf(&out->buf[total], space, "%s/%s:", path, fname);
+		total += len > space ? space : len;
 		if (len > space)
 			return -1;
-		space = out->size - out->total;
+		space = out->size - total;
 		if (!space)
 			return -1;
-		len = file->fmt(file->private, file->arg, &out->buf[out->total], space);
-		out->total += len > space ? space : len;
+		len = file->fmt(file->private, file->arg, &out->buf[total], space);
+		total += len > space ? space : len;
 		if (len > space)
 			return -1;
+		/* Now the line is fully generated */
+		out->total = total;
+		++out->lines;
 	} else {
 		/* directory walk */
 		struct procstat_item *child;
@@ -549,14 +565,13 @@ static void aggregator_read(fuse_req_t req, struct procstat_file *file, struct r
 	struct list_head *self = &file->base.entry;
 	struct out_stream out;
 	char path[MAX_PATH_LEN];
-	size_t _off;
 
 	if (!as || (as->buf_size < size + AGGR_EXTRA_BYTES)) {
 		struct aggregator_context c;
 
 		if (!as) {
 			c.current = dir->children.next;
-			c.discard_bytes = 0;
+			c.discard_lines = 0;
 			c.off = 0;
 		} else {
 			c = as->c;
@@ -580,7 +595,9 @@ static void aggregator_read(fuse_req_t req, struct procstat_file *file, struct r
 
 	out.buf = &as->buffer[0];
 	out.total = 0;
-	out.size = size + as->c.discard_bytes;
+	out.size = size;
+	out.discard_lines = as->c.discard_lines;
+	as->c.discard_lines = 0;
 
 	if (off != as->c.off) {
 		/* we do not support non-sequential read */
@@ -590,13 +607,10 @@ static void aggregator_read(fuse_req_t req, struct procstat_file *file, struct r
 		return;
 	}
 
-	_off = as->c.discard_bytes;
-	as->c.discard_bytes = 0;
-
 	for (; as->c.current != last; as->c.current = as->c.current->next) {
 		struct procstat_item *item;
 		int ret;
-		size_t start_offset = out.total;
+		unsigned start_line = out.lines;
 
 		if (as->c.current == self)
 			continue;
@@ -605,13 +619,19 @@ static void aggregator_read(fuse_req_t req, struct procstat_file *file, struct r
 		path[0] = 0;
 		ret = out_item(&out, path, item);
 		if (ret) {
-			as->c.discard_bytes = out.total - start_offset;
+			/* out.total marks the end of the last complete line generated */
+			if (out.total && (out.total < out.size)) {
+				/* pad spaces at the end of the last complete line to the buffer end */
+				memset(&out.buf[out.total - 1], ' ', out.size - out.total);
+				out.total = out.size;
+				out.buf[out.total - 1] = '\n';
+			}
+			as->c.discard_lines = out.lines - start_line; /* lines from current successfully written */
 			break;
 		}
 	}
-	out.total -= _off;
 	as->c.off += out.total;
-	fuse_reply_buf(req, &out.buf[_off], out.total);
+	fuse_reply_buf(req, &out.buf[0], out.total);
 }
 
 static void fuse_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi)
