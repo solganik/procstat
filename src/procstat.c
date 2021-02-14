@@ -528,6 +528,9 @@ static int out_item(struct out_stream *out, char *path, struct procstat_item *it
 		total += len > space ? space : len;
 		if (len > space)
 			return -1;
+		if (len == space)
+			/* exact fit: snprintf clobbers the last char (\n) with a 0: restore it */
+			out->buf[total - 1] = '\n';
 		/* Now the line is fully generated */
 		out->total = total;
 		++out->lines;
