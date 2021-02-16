@@ -458,6 +458,8 @@ static void fuse_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 	fi->direct_io = true;
 
 	++item->refcnt;
+	if (item->flags & STATS_ENTRY_FLAG_AGGREGATOR)
+		++item->parent->base.refcnt;
 
 	pthread_mutex_unlock(&context->global_lock);
 	fuse_reply_open(req, fi);
@@ -569,11 +571,13 @@ static void aggregator_read(fuse_req_t req, struct procstat_file *file, struct r
 	struct out_stream out;
 	char path[MAX_PATH_LEN];
 
+	struct procstat_context *context = request_context(req);
+
 	if (!as || (as->buf_size < size + AGGR_EXTRA_BYTES)) {
 		struct aggregator_context c;
 
 		if (!as) {
-			c.current = dir->children.next;
+			c.current = NULL;
 			c.discard_lines = 0;
 			c.off = 0;
 		} else {
@@ -610,6 +614,22 @@ static void aggregator_read(fuse_req_t req, struct procstat_file *file, struct r
 		return;
 	}
 
+	/*
+	 * While the aggregator node is open, the node and the parent directory node cannot be freed, so setting "last" above was safe.
+	 */
+	pthread_mutex_lock(&context->global_lock);
+
+	if (!as->c.current) {
+		as->c.current = dir->children.next;
+	} else if (as->c.current != last) {
+		struct procstat_item *current = container_of(as->c.current, struct procstat_item, entry);
+		--current->refcnt;
+		/* If this node has been deleted it is removed from parent's children list */
+		if (list_empty(&current->entry)) {
+			as->c.current = last;
+		}
+	}
+
 	for (; as->c.current != last; as->c.current = as->c.current->next) {
 		struct procstat_item *item;
 		int ret;
@@ -633,8 +653,32 @@ static void aggregator_read(fuse_req_t req, struct procstat_file *file, struct r
 			break;
 		}
 	}
+
+	/* Protect the current item from being freed, so we can safely access it next time */
+	if (as->c.current != last)
+		++(container_of(as->c.current, struct procstat_item, entry)->refcnt);
+
 	as->c.off += out.total;
+	pthread_mutex_unlock(&context->global_lock);
 	fuse_reply_buf(req, &out.buf[0], out.total);
+}
+
+static void aggregator_release_locked(struct procstat_item *item, struct fuse_file_info *fi)
+{
+	struct read_struct *rs = (struct read_struct *)fi->fh;
+
+	if (rs) {
+		struct aggregator_struct *as = (struct aggregator_struct *)rs->ext;
+
+		if (as && as->c.current) {
+			if (as->c.current != &item->parent->children) {
+				struct procstat_item *current = container_of(as->c.current, struct procstat_item, entry);
+
+				--current->refcnt;
+			}
+		}
+	}
+	--item->parent->base.refcnt;
 }
 
 static void fuse_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi)
@@ -1325,6 +1369,8 @@ static void fuse_release(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *
 	struct procstat_item *item = fuse_inode_to_item(request_context(req), ino);
 
 	pthread_mutex_lock(&context->global_lock);
+	if (item->flags & STATS_ENTRY_FLAG_AGGREGATOR)
+		aggregator_release_locked(item, fi);
 	if (--item->refcnt == 0)
 		free_item(item);
 	pthread_mutex_unlock(&context->global_lock);
