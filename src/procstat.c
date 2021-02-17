@@ -380,6 +380,8 @@ static void fuse_readdir(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
 
 		if (!item_registered(iter))
 			continue;
+		if (iter->flags & STATS_ENTRY_FLAG_AGGREGATOR)
+			continue;
 		memset(&stat, 0, sizeof(stat));
 		fname = procstat_item_name(iter);
 		fill_item_stats(context, iter, &stat);
