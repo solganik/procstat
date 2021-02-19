@@ -61,6 +61,8 @@ enum {
 	STATS_ENTRY_FLAG_AGGREGATOR  = 1 << 3,
 };
 
+#define SERIES_RESET_CLOCK CLOCK_MONOTONIC_COARSE
+
 #define ATTRIBUTES_TIMEOUT_SEC (60.0 * 60)
 #define DNAME_INLINE_LEN 32
 struct procstat_dynamic_name {
@@ -1015,7 +1017,7 @@ bool is_reset(struct reset_info* reset)
 	uint64_t reset_interval, time_since_last_reset;
 
 	struct timespec cur_time;
-	if (clock_gettime(CLOCK_REALTIME, &cur_time) == 0) {
+	if (clock_gettime(SERIES_RESET_CLOCK, &cur_time) == 0) {
 		time_since_last_reset = cur_time.tv_sec - reset->last_reset_time;
 		reset_interval = __atomic_load_n(&reset->reset_interval, __ATOMIC_RELAXED);
 		if ((reset_interval) && (time_since_last_reset > reset_interval)) {
@@ -1226,7 +1228,7 @@ int procstat_create_u64_series(struct procstat_context *context, struct procstat
 	}
 
 	struct timespec cur_time;
-	if (clock_gettime(CLOCK_REALTIME, &cur_time) == 0) {
+	if (clock_gettime(SERIES_RESET_CLOCK, &cur_time) == 0) {
 		series->reset.last_reset_time = cur_time.tv_sec;
 	} else {
 		series->reset.last_reset_time = 0;
@@ -1696,7 +1698,7 @@ int procstat_create_histogram_u32_series(struct procstat_context *context, struc
 	}
 
 	struct timespec cur_time;
-	if (clock_gettime(CLOCK_REALTIME, &cur_time) == 0) {
+	if (clock_gettime(SERIES_RESET_CLOCK, &cur_time) == 0) {
 		series->reset.last_reset_time = cur_time.tv_sec;
 	} else {
 		series->reset.last_reset_time = 0;
