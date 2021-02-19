@@ -546,6 +546,10 @@ static int out_item(struct out_stream *out, char *path, struct procstat_item *it
 		int p_space = MAX_PATH_LEN - path_len;
 		struct procstat_directory *dir = container_of(item, struct procstat_directory, base);
 
+		/* See fuse_read(): it is unsafe to read files under a directory that is marked unregistered */
+		if (!item_registered(item))
+			return 0;
+
 		if (pos && p_space) {
 			path[pos++] = '/';
 			--p_space;
@@ -693,7 +697,15 @@ static void fuse_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, st
 		return;
 	}
 
-	if (!file->fmt) {
+	/*
+	 * An item unregistered via procstat_remove may still be reached here: the item itself has refcnt held from fuse_open.
+	 * If so, the owner may have freed the item stat memory, which is still ok to read.
+	 * HOWEVER, writing to this memory is prohibited and may cause memory corruption.
+	 * Write is possible only for series (see is_reset() and clear_values_...).
+	 * The item itself may not be marked as unregistered (refcnt != 0 in item_put_locked),
+	 * but since series are removed by directory we can rely on parent being marked as unregistered by procstat_remove().
+	 */
+	if (!file->fmt || !file->base.parent || !item_registered(&file->base.parent->base)) {
 		fuse_reply_buf(req, NULL, 0);
 		return;
 	}
