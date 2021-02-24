@@ -58,7 +58,10 @@ enum {
 	STATS_ENTRY_FLAG_REGISTERED  = 1 << 0,
 	STATS_ENTRY_FLAG_DIR	     = 1 << 1,
 	STATS_ENTRY_FLAG_HISTOGRAM   = 1 << 2,
+	STATS_ENTRY_FLAG_AGGREGATOR  = 1 << 3,
 };
+
+#define SERIES_RESET_CLOCK CLOCK_MONOTONIC_COARSE
 
 #define ATTRIBUTES_TIMEOUT_SEC (60.0 * 60)
 #define DNAME_INLINE_LEN 32
@@ -379,6 +382,8 @@ static void fuse_readdir(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off,
 
 		if (!item_registered(iter))
 			continue;
+		if (iter->flags & STATS_ENTRY_FLAG_AGGREGATOR)
+			continue;
 		memset(&stat, 0, sizeof(stat));
 		fname = procstat_item_name(iter);
 		fill_item_stats(context, iter, &stat);
@@ -425,6 +430,7 @@ static bool allowed_open(struct procstat_item *item, struct fuse_file_info *fi)
 struct read_struct {
 	ssize_t size;
 	char buffer[READ_BUFFER_SIZE];
+	void *ext;
 };
 
 static void fuse_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
@@ -449,12 +455,15 @@ static void fuse_open(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *fi)
 	if (!allowed_open(item, fi))
 		goto out_locked;
 
+	read_buffer->ext = NULL;
 	fi->fh = (uint64_t)read_buffer;
 
 	/* we dont know size of file in advance so use directio*/
 	fi->direct_io = true;
 
 	++item->refcnt;
+	if (item->flags & STATS_ENTRY_FLAG_AGGREGATOR)
+		++item->parent->base.refcnt;
 
 	pthread_mutex_unlock(&context->global_lock);
 	fuse_reply_open(req, fi);
@@ -467,12 +476,238 @@ out_locked:
 	fuse_reply_err(req, ret);
 }
 
+struct out_stream {
+	char *buf;
+	size_t size;
+	size_t total;
+	unsigned lines;
+	unsigned discard_lines;
+};
+
+#define AGGR_EXTRA_BYTES 0
+
+struct aggregator_context {
+	struct list_head *current;
+	size_t off;
+	unsigned discard_lines; /* from the front of the current */
+};
+
+struct aggregator_struct {
+	struct aggregator_context c;
+	size_t buf_size;
+	char buffer[0];
+};
+
+#define MAX_PATH_LEN 120
+static int out_item(struct out_stream *out, char *path, struct procstat_item *item)
+{
+	const char *fname;
+	int len;
+	int ret = 0;
+
+	fname = procstat_item_name(item);
+	if (!item_type_directory(item)) {
+		struct procstat_file *file = container_of(item, struct procstat_file, base);
+		int space = out->size - out->total;
+		size_t total = out->total;
+
+		if (!file->fmt)
+			return 0; /* skipping write-only files */
+		if (out->discard_lines) {
+			--out->discard_lines;
+			/*
+			 * Count the discarded lines, so in case we run out of the buffer space
+			 * on the first root directory item, the new discard_lines value will
+			 * include the previous one and the number of newly generated lines.
+			 */
+			++out->lines;
+			return 0;
+		}
+		len = snprintf(&out->buf[total], space, "%s/%s:", path, fname);
+		total += len > space ? space : len;
+		if (len > space)
+			return -1;
+		space = out->size - total;
+		if (!space)
+			return -1;
+		len = file->fmt(file->private, file->arg, &out->buf[total], space);
+		total += len > space ? space : len;
+		if (len > space)
+			return -1;
+		if (len == space)
+			/* exact fit: snprintf clobbers the last char (\n) with a 0: restore it */
+			out->buf[total - 1] = '\n';
+		/* Now the line is fully generated */
+		out->total = total;
+		++out->lines;
+	} else {
+		/* directory walk */
+		struct procstat_item *child;
+		int path_len = strlen(path);
+		int pos = path_len;
+		int p_space = MAX_PATH_LEN - path_len;
+		struct procstat_directory *dir = container_of(item, struct procstat_directory, base);
+
+		/* See fuse_read(): it is unsafe to read files under a directory that is marked unregistered */
+		if (!item_registered(item))
+			return 0;
+
+		if (pos && p_space) {
+			path[pos++] = '/';
+			--p_space;
+		}
+		strncpy(path + pos, fname, p_space);
+		path[MAX_PATH_LEN - 1] = 0;
+
+		list_for_each_entry(child, &dir->children, entry) {
+			ret = out_item(out, path, child);
+			if (ret)
+				break;
+		}
+		path[path_len] = 0;
+	}
+
+	return ret;
+}
+
+static void aggregator_read(fuse_req_t req, struct procstat_file *file, struct read_struct *rs, size_t size, off_t off)
+{
+	struct aggregator_struct *as = (struct aggregator_struct *)rs->ext;
+	struct procstat_directory *dir = file->base.parent;
+	struct list_head *last = &dir->children;
+	struct list_head *self = &file->base.entry;
+	struct out_stream out;
+	char path[MAX_PATH_LEN];
+
+	struct procstat_context *context = request_context(req);
+
+	if (!as || (as->buf_size < size + AGGR_EXTRA_BYTES)) {
+		struct aggregator_context c;
+
+		if (!as) {
+			c.current = NULL;
+			c.discard_lines = 0;
+			c.off = 0;
+		} else {
+			c = as->c;
+			free(as);
+		}
+
+		as = malloc(sizeof(*as) + size + AGGR_EXTRA_BYTES);
+		if (!as) {
+			fuse_reply_buf(req, NULL, 0);
+			return;
+		}
+		as->c = c;
+		as->buf_size = size + AGGR_EXTRA_BYTES;
+		rs->ext = (void *)as;
+	}
+
+	if (as->c.current == last) {
+		fuse_reply_buf(req, NULL, 0);
+		return;
+	}
+
+	out.buf = &as->buffer[0];
+	out.total = 0;
+	out.size = size;
+	out.discard_lines = as->c.discard_lines;
+	as->c.discard_lines = 0;
+
+	if (off != as->c.off) {
+		/* we do not support non-sequential read */
+		out.total = sprintf(&out.buf[0], "Unexpected offset %ld wanted %ld size %ld\n", off, as->c.off, size);
+		as->c.current = last;
+		fuse_reply_buf(req, &out.buf[0], out.total);
+		return;
+	}
+
+	/*
+	 * While the aggregator node is open, the node and the parent directory node cannot be freed, so setting "last" above was safe.
+	 */
+	pthread_mutex_lock(&context->global_lock);
+
+	if (!as->c.current) {
+		as->c.current = dir->children.next;
+	} else if (as->c.current != last) {
+		struct procstat_item *current = container_of(as->c.current, struct procstat_item, entry);
+		--current->refcnt;
+		/* If this node has been deleted it is removed from parent's children list */
+		if (list_empty(&current->entry)) {
+			as->c.current = last;
+		}
+	}
+
+	for (; as->c.current != last; as->c.current = as->c.current->next) {
+		struct procstat_item *item;
+		int ret;
+		unsigned start_line = out.lines;
+
+		if (as->c.current == self)
+			continue;
+
+		item = container_of(as->c.current, struct procstat_item, entry);
+		path[0] = 0;
+		ret = out_item(&out, path, item);
+		if (ret) {
+			/* out.total marks the end of the last complete line generated */
+			if (out.total && (out.total < out.size)) {
+				/* pad spaces at the end of the last complete line to the buffer end */
+				memset(&out.buf[out.total - 1], ' ', out.size - out.total);
+				out.total = out.size;
+				out.buf[out.total - 1] = '\n';
+			}
+			as->c.discard_lines = out.lines - start_line; /* lines from current successfully written */
+			break;
+		}
+	}
+
+	/* Protect the current item from being freed, so we can safely access it next time */
+	if (as->c.current != last)
+		++(container_of(as->c.current, struct procstat_item, entry)->refcnt);
+
+	as->c.off += out.total;
+	pthread_mutex_unlock(&context->global_lock);
+	fuse_reply_buf(req, &out.buf[0], out.total);
+}
+
+static void aggregator_release_locked(struct procstat_item *item, struct fuse_file_info *fi)
+{
+	struct read_struct *rs = (struct read_struct *)fi->fh;
+
+	if (rs) {
+		struct aggregator_struct *as = (struct aggregator_struct *)rs->ext;
+
+		if (as && as->c.current) {
+			if (as->c.current != &item->parent->children) {
+				struct procstat_item *current = container_of(as->c.current, struct procstat_item, entry);
+
+				--current->refcnt;
+			}
+		}
+	}
+	--item->parent->base.refcnt;
+}
+
 static void fuse_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, struct fuse_file_info *fi)
 {
 	struct read_struct *read_buffer = (struct read_struct *)fi->fh;
 	struct procstat_file *file = fuse_inode_to_file(ino);
 
-	if (!file->fmt) {
+	if (file->base.flags & STATS_ENTRY_FLAG_AGGREGATOR) {
+		aggregator_read(req, file, read_buffer, size, off);
+		return;
+	}
+
+	/*
+	 * An item unregistered via procstat_remove may still be reached here: the item itself has refcnt held from fuse_open.
+	 * If so, the owner may have freed the item stat memory, which is still ok to read.
+	 * HOWEVER, writing to this memory is prohibited and may cause memory corruption.
+	 * Write is possible only for series (see is_reset() and clear_values_...).
+	 * The item itself may not be marked as unregistered (refcnt != 0 in item_put_locked),
+	 * but since series are removed by directory we can rely on parent being marked as unregistered by procstat_remove().
+	 */
+	if (!file->fmt || !file->base.parent || !item_registered(&file->base.parent->base)) {
 		fuse_reply_buf(req, NULL, 0);
 		return;
 	}
@@ -753,6 +988,28 @@ error_release:
 	return -1;
 }
 
+int procstat_create_aggregator(struct procstat_context *context,
+			      struct procstat_item *parent,
+			      const char *name)
+{
+	parent = parent_or_root(context, parent);
+	if (!parent) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	struct procstat_file *file;
+
+	file = create_file(context, (struct procstat_directory *)parent,
+			   name, NULL, NULL, NULL);
+	if (!file)
+		return -1;
+
+	file->base.flags |= STATS_ENTRY_FLAG_AGGREGATOR;
+
+	return 0;
+}
+
 bool is_reset(struct reset_info* reset)
 {
 	unsigned reset_requested = 0;
@@ -760,7 +1017,7 @@ bool is_reset(struct reset_info* reset)
 	uint64_t reset_interval, time_since_last_reset;
 
 	struct timespec cur_time;
-	if (clock_gettime(CLOCK_REALTIME, &cur_time) == 0) {
+	if (clock_gettime(SERIES_RESET_CLOCK, &cur_time) == 0) {
 		time_since_last_reset = cur_time.tv_sec - reset->last_reset_time;
 		reset_interval = __atomic_load_n(&reset->reset_interval, __ATOMIC_RELAXED);
 		if ((reset_interval) && (time_since_last_reset > reset_interval)) {
@@ -880,7 +1137,7 @@ static ssize_t series_u64_read(void *object, uint64_t arg, char *buffer, size_t 
 		return -1;
 	}
 write_zero:
-	return snprintf(buffer, len, "0");
+	return snprintf(buffer, len, "0\n");
 write_var:
 	return procstat_format_u64_decimal(data_ptr, arg, buffer, len);
 
@@ -971,7 +1228,7 @@ int procstat_create_u64_series(struct procstat_context *context, struct procstat
 	}
 
 	struct timespec cur_time;
-	if (clock_gettime(CLOCK_REALTIME, &cur_time) == 0) {
+	if (clock_gettime(SERIES_RESET_CLOCK, &cur_time) == 0) {
 		series->reset.last_reset_time = cur_time.tv_sec;
 	} else {
 		series->reset.last_reset_time = 0;
@@ -1128,10 +1385,16 @@ static void fuse_release(fuse_req_t req, fuse_ino_t ino, struct fuse_file_info *
 	struct procstat_item *item = fuse_inode_to_item(request_context(req), ino);
 
 	pthread_mutex_lock(&context->global_lock);
+	if (item->flags & STATS_ENTRY_FLAG_AGGREGATOR)
+		aggregator_release_locked(item, fi);
 	if (--item->refcnt == 0)
 		free_item(item);
 	pthread_mutex_unlock(&context->global_lock);
-	free((void *)fi->fh);
+	if (fi->fh) {
+		struct read_struct *fh = (struct read_struct *)fi->fh;
+		free(fh->ext);
+		free(fh);
+	}
 	fuse_reply_err(req, 0);
 }
 
@@ -1335,7 +1598,7 @@ static ssize_t histogram_u32_series_read(void *object, uint64_t arg, char *buffe
 		return -1;
 	}
 write_zero:
-	return snprintf(buffer, len, "0");
+	return snprintf(buffer, len, "0\n");
 write_var:
 	return procstat_format_u64_decimal(data_ptr, arg, buffer, len);
 }
@@ -1435,7 +1698,7 @@ int procstat_create_histogram_u32_series(struct procstat_context *context, struc
 	}
 
 	struct timespec cur_time;
-	if (clock_gettime(CLOCK_REALTIME, &cur_time) == 0) {
+	if (clock_gettime(SERIES_RESET_CLOCK, &cur_time) == 0) {
 		series->reset.last_reset_time = cur_time.tv_sec;
 	} else {
 		series->reset.last_reset_time = 0;

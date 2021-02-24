@@ -154,6 +154,13 @@ int procstat_create_simple(struct procstat_context *context,
 			   struct procstat_simple_handle *descriptors,
 			   size_t descriptors_len);
 
+/**
+ * @brief creates a file that on read outputs the contents of the entire directory tree.
+ * @return 0 on success, -1  in case of failure and errno will be set accordingly
+ */
+int procstat_create_aggregator(struct procstat_context *context,
+			   struct procstat_item *parent,
+			   const char *name);
 
 
 #define DEFINE_PROCSTAT_FORMATTER(__type, __fmt, __fmt_name)\
