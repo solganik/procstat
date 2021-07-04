@@ -34,6 +34,7 @@
 
 #define FUSE_USE_VERSION 26
 #include <fuse/fuse_lowlevel.h>
+#include <dirent.h>
 #include <stdbool.h>
 #include <errno.h>
 #include "procstat.h"
@@ -1466,15 +1467,25 @@ free_stats:
 	return NULL;
 }
 
+
+
 void procstat_stop(struct procstat_context *context)
 {
 	struct fuse_session *session;
 
+
 	assert(context);
 	session = context->session;
 
-	if (session)
+	if (session) {
+		DIR *root_dir;
+		// Closing the dir after "fuse_session_exit" causes fuse looper
+		// to receive a callback and exit. Otherwise thread running
+		// fuse loop can stuck
+		root_dir = opendir(context->mountpoint);
 		fuse_session_exit(session);
+		closedir(root_dir);
+	}
 }
 
 void procstat_destroy(struct procstat_context *context)
