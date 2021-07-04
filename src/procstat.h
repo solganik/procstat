@@ -242,7 +242,7 @@ static inline ssize_t procstat_format_ ## __type ##_## name(void *object, uint64
  * @fmt data formatter
  */
 struct procstat_start_end_handle {
-	char *name;
+	const char *name;
 	void *start;
 	void *end;
 	procstats_formatter fmt;
