@@ -80,6 +80,22 @@ TEST_F (ProcstatTest, test_create_dirs) {
 }
 
 
+TEST_F (ProcstatTest, test_remove_item_not_visible_from_parent) {
+	struct procstat_item *item, *item2, *item3;
+
+	item = procstat_create_directory(context, nullptr, "outer");
+	ASSERT_TRUE(boost::filesystem::exists(mount_name() + "/outer"));
+	item2 = procstat_create_directory(context, item, "inner");
+	ASSERT_TRUE(boost::filesystem::exists(mount_name() + "/outer/inner"));
+	item3 = procstat_lookup_item(context, item, "inner");
+	ASSERT_EQ(item2, item3);
+
+	procstat_remove(context, item3);
+	ASSERT_FALSE(boost::filesystem::exists(mount_name() + "/outer/inner"));
+	item3 = procstat_lookup_item(context, item, "inner");
+	ASSERT_TRUE(!item3);
+}
+
 TEST_F (ProcstatTest, test_create_invalid_filename) {
 	u64 dummy;
 	int error;
@@ -457,4 +473,52 @@ TEST_F (ProcstatTest, test_control)
 	procstat_remove(context, item);
 }
 
+TEST_F (ProcstatTest, test_delete_stat_after_open)
+{
+	ifstream read_try;
+
+	int *value;
+	int error;
+
+	value = (int *)malloc(sizeof(int));
+	*value = 10;
+
+	error = procstat_create_int_parameter(context, NULL, "param", value);
+	ASSERT_TRUE(!error);
+
+	ASSERT_EQ(10, read_stat_file<int>(mount_name() + "/param"));
+
+	// Open the file
+	read_try.open(mount_name() + "/param");
+	procstat_remove_by_name(context, NULL, "param");
+	free(value);
+
+	ASSERT_EQ(-1, read_try.peek());
+}
+
+
+TEST_F (ProcstatTest, test_delete_via_root_dir_after_open)
+{
+	ifstream read_try;
+
+	int *value;
+	int error;
+
+	value = (int *)malloc(sizeof(int));
+	*value = 10;
+
+	struct procstat_item *item1 = procstat_create_directory(context, NULL, "dir1");
+	struct procstat_item *item2 = procstat_create_directory(context, item1, "dir2");
+
+	error = procstat_create_int_parameter(context, item2, "param", value);
+	ASSERT_TRUE(!error);
+	ASSERT_EQ(10, read_stat_file<int>(mount_name() + "/dir1/dir2/param"));
+
+	// Open the file
+	read_try.open(mount_name() + "/dir1/dir2/param");
+	procstat_remove_by_name(context, NULL, "dir1");
+	free(value);
+
+	ASSERT_EQ(-1, read_try.peek());
+}
 
