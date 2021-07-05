@@ -34,6 +34,7 @@
 
 #define FUSE_USE_VERSION 26
 #include <fuse/fuse_lowlevel.h>
+#include <dirent.h>
 #include <stdbool.h>
 #include <errno.h>
 #include "procstat.h"
@@ -277,7 +278,8 @@ static void fuse_forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup) {
 
 	pthread_mutex_lock(&context->global_lock);
 	item = (struct procstat_item *)(ino);
-	if (nlookup >= item->refcnt) {
+	assert(nlookup <= item->refcnt);
+	if (nlookup == item->refcnt) {
 		item->refcnt = 1;
 		item_put_locked(item);
 	} else {
@@ -699,16 +701,14 @@ static void fuse_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, st
 		return;
 	}
 
-	/*
-	 * An item unregistered via procstat_remove may still be reached here: the item itself has refcnt held from fuse_open.
-	 * If so, the owner may have freed the item stat memory, which is still ok to read.
-	 * HOWEVER, writing to this memory is prohibited and may cause memory corruption.
-	 * Write is possible only for series (see is_reset() and clear_values_...).
-	 * The item itself may not be marked as unregistered (refcnt != 0 in item_put_locked),
-	 * but since series are removed by directory we can rely on parent being marked as unregistered by procstat_remove().
-	 */
-	if (!file->fmt || !file->base.parent || !item_registered(&file->base.parent->base)) {
-		fuse_reply_buf(req, NULL, 0);
+
+	if (!item_registered(&file->base)) {
+		fuse_reply_err(req, ENOENT);
+		return;
+	}
+
+	if (!file->fmt) {
+		fuse_reply_err(req, EPERM);
 		return;
 	}
 
@@ -812,7 +812,6 @@ static void item_put_children_locked(struct procstat_directory *directory)
 	struct procstat_item *iter, *n;
 	list_for_each_entry_safe(iter, n, &directory->children, entry) {
 		iter->parent = NULL;
-		list_del_init(&iter->entry);
 		item_put_locked(iter);
 	}
 }
@@ -821,13 +820,17 @@ static void item_put_locked(struct procstat_item *item)
 {
 	assert(item->refcnt);
 
-	if (--item->refcnt)
-		return;
+	if (!item_registered(item))
+		goto free_item;
 
+	list_del_init(&item->entry);
 	item->flags &= ~STATS_ENTRY_FLAG_REGISTERED;
 	if (item_type_directory(item))
 		item_put_children_locked((struct procstat_directory *)item);
 
+free_item:
+	if (--item->refcnt)
+		return;
 	free_item(item);
 }
 
@@ -911,6 +914,10 @@ void procstat_remove(struct procstat_context *context, struct procstat_item *ite
 	assert(item);
 
 	pthread_mutex_lock(&context->global_lock);
+
+	if (!item_registered(item))
+		goto done;
+
 	if (!item_type_directory(item))
 		goto remove_item;
 
@@ -921,8 +928,6 @@ void procstat_remove(struct procstat_context *context, struct procstat_item *ite
 	}
 
 remove_item:
-	item->flags &= ~STATS_ENTRY_FLAG_REGISTERED;
-	list_del_init(&item->entry); /* Make it not discoverable */
 	item_put_locked(item);
 done:
 	pthread_mutex_unlock(&context->global_lock);
@@ -947,8 +952,6 @@ int procstat_remove_by_name(struct procstat_context *context,
 		pthread_mutex_unlock(&context->global_lock);
 		return ENOENT;
 	}
-	item->flags &= ~STATS_ENTRY_FLAG_REGISTERED;
-	list_del_init(&item->entry); /* Make it not discoverable */
 	item_put_locked(item);
 	pthread_mutex_unlock(&context->global_lock);
 	return 0;
@@ -1466,15 +1469,25 @@ free_stats:
 	return NULL;
 }
 
+
+
 void procstat_stop(struct procstat_context *context)
 {
 	struct fuse_session *session;
 
+
 	assert(context);
 	session = context->session;
 
-	if (session)
+	if (session) {
+		DIR *root_dir;
+		// Closing the dir after "fuse_session_exit" causes fuse looper
+		// to receive a callback and exit. Otherwise thread running
+		// fuse loop can stuck
+		root_dir = opendir(context->mountpoint);
 		fuse_session_exit(session);
+		closedir(root_dir);
+	}
 }
 
 void procstat_destroy(struct procstat_context *context)
@@ -1727,16 +1740,43 @@ void procstat_histogram_u32_series_set_reset_interval(struct procstat_histogram_
 struct procstat_item *procstat_lookup_item(struct procstat_context *context,
 		struct procstat_item *parent, const char *name)
 {
-	struct procstat_item *item;
+	struct procstat_item *item = NULL;
 
-	parent = parent_or_root(context, parent);
 	pthread_mutex_lock(&context->global_lock);
+	parent = parent_or_root(context, parent);
+
+	if (!item_registered(parent)) {
+		goto done;
+	}
 
 	item = lookup_item_locked((struct procstat_directory *)parent,
 				  name, string_hash(name));
 
-	pthread_mutex_unlock(&context->global_lock);
+	if (!item || !item_registered(item)) {
+		item = NULL;
+		goto done;
+	}
 
+	++item->refcnt;
+
+done:
+	pthread_mutex_unlock(&context->global_lock);
 	return item;
 }
 
+void procstat_refget(struct procstat_context *context, struct procstat_item *item)
+{
+	pthread_mutex_lock(&context->global_lock);
+	++item->refcnt;
+	pthread_mutex_unlock(&context->global_lock);
+}
+
+void procstat_refput(struct procstat_context *context, struct procstat_item *item)
+{
+	pthread_mutex_lock(&context->global_lock);
+	if (item->refcnt == 1)
+		item_put_locked(item);
+	else
+		--item->refcnt;
+	pthread_mutex_unlock(&context->global_lock);
+}
