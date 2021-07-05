@@ -278,7 +278,8 @@ static void fuse_forget(fuse_req_t req, fuse_ino_t ino, uint64_t nlookup) {
 
 	pthread_mutex_lock(&context->global_lock);
 	item = (struct procstat_item *)(ino);
-	if (nlookup >= item->refcnt) {
+	assert(nlookup <= item->refcnt);
+	if (nlookup == item->refcnt) {
 		item->refcnt = 1;
 		item_put_locked(item);
 	} else {
