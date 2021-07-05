@@ -91,9 +91,12 @@ TEST_F (ProcstatTest, test_remove_item_not_visible_from_parent) {
 	ASSERT_EQ(item2, item3);
 
 	procstat_remove(context, item3);
+	procstat_refput(context, item3);
+
 	ASSERT_FALSE(boost::filesystem::exists(mount_name() + "/outer/inner"));
 	item3 = procstat_lookup_item(context, item, "inner");
 	ASSERT_TRUE(!item3);
+
 }
 
 TEST_F (ProcstatTest, test_create_invalid_filename) {
@@ -161,16 +164,19 @@ TEST_F (ProcstatTest, test_create_multiple_dirs_and_files) {
 	item = procstat_lookup_item(context, NULL, "outer-0");
 	assert(item);
 	printf("Found directory outer-0!\n\n");
+	procstat_refput(context, item);
 
 	printf("Lookup directory named inner-3 under outer-0\n");
 	item = procstat_lookup_item(context, item, "inner-3");
 	assert(item);
 	printf("Found directory inner-3!\n\n");
+	procstat_refput(context, item);
 
 	printf("Lookup file named value-6 under inner-3\n");
 	item = procstat_lookup_item(context, item, "value-6");
 	assert(item);
 	printf("Found file value-6!\n\n");
+	procstat_refput(context, item);
 
 	printf("Delete several directories outer-0s\n");
 	procstat_remove_by_name(context, NULL, "outer-0");
