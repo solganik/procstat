@@ -145,6 +145,21 @@ int procstat_remove_by_name(struct procstat_context *context, struct procstat_it
 struct procstat_item *procstat_lookup_item(struct procstat_context *context,
 		struct procstat_item *parent, const char *name);
 
+
+/**
+ * @brief - increments refcount for @item
+ * @context -statistics context
+ * @item - object to take reference for
+ */
+void procstat_refget(struct procstat_context *context, struct procstat_item *item);
+
+/**
+ * @brief - decrements refcount for @item, when reaches 0 item is released
+ * @context -statistics context
+ * @item - object to take reference for
+ */
+void procstat_refput(struct procstat_context *context, struct procstat_item *item);
+
 /**
  * @brief creates counter, which will be exposed as @name under @parent dictory.
  * @return 0 on success, -1  in case of failure and errno will be set accordingly

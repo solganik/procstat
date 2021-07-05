@@ -1740,16 +1740,43 @@ void procstat_histogram_u32_series_set_reset_interval(struct procstat_histogram_
 struct procstat_item *procstat_lookup_item(struct procstat_context *context,
 		struct procstat_item *parent, const char *name)
 {
-	struct procstat_item *item;
+	struct procstat_item *item = NULL;
 
-	parent = parent_or_root(context, parent);
 	pthread_mutex_lock(&context->global_lock);
+	parent = parent_or_root(context, parent);
+
+	if (!item_registered(parent)) {
+		goto done;
+	}
 
 	item = lookup_item_locked((struct procstat_directory *)parent,
 				  name, string_hash(name));
 
-	pthread_mutex_unlock(&context->global_lock);
+	if (!item || !item_registered(item)) {
+		item = NULL;
+		goto done;
+	}
 
+	++item->refcnt;
+
+done:
+	pthread_mutex_unlock(&context->global_lock);
 	return item;
 }
 
+void procstat_refget(struct procstat_context *context, struct procstat_item *item)
+{
+	pthread_mutex_lock(&context->global_lock);
+	++item->refcnt;
+	pthread_mutex_unlock(&context->global_lock);
+}
+
+void procstat_refput(struct procstat_context *context, struct procstat_item *item)
+{
+	pthread_mutex_lock(&context->global_lock);
+	if (item->refcnt == 1)
+		item_put_locked(item);
+	else
+		--item->refcnt;
+	pthread_mutex_unlock(&context->global_lock);
+}
