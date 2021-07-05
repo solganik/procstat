@@ -812,7 +812,6 @@ static void item_put_children_locked(struct procstat_directory *directory)
 	struct procstat_item *iter, *n;
 	list_for_each_entry_safe(iter, n, &directory->children, entry) {
 		iter->parent = NULL;
-		list_del_init(&iter->entry);
 		item_put_locked(iter);
 	}
 }
@@ -821,10 +820,15 @@ static void item_put_locked(struct procstat_item *item)
 {
 	assert(item->refcnt);
 
+	if (!item_registered(item))
+		goto free_item;
+
+	list_del_init(&item->entry);
 	item->flags &= ~STATS_ENTRY_FLAG_REGISTERED;
 	if (item_type_directory(item))
 		item_put_children_locked((struct procstat_directory *)item);
 
+free_item:
 	if (--item->refcnt)
 		return;
 	free_item(item);
@@ -910,6 +914,10 @@ void procstat_remove(struct procstat_context *context, struct procstat_item *ite
 	assert(item);
 
 	pthread_mutex_lock(&context->global_lock);
+
+	if (!item_registered(item))
+		goto done;
+
 	if (!item_type_directory(item))
 		goto remove_item;
 
@@ -920,8 +928,6 @@ void procstat_remove(struct procstat_context *context, struct procstat_item *ite
 	}
 
 remove_item:
-	item->flags &= ~STATS_ENTRY_FLAG_REGISTERED;
-	list_del_init(&item->entry); /* Make it not discoverable */
 	item_put_locked(item);
 done:
 	pthread_mutex_unlock(&context->global_lock);
@@ -946,8 +952,6 @@ int procstat_remove_by_name(struct procstat_context *context,
 		pthread_mutex_unlock(&context->global_lock);
 		return ENOENT;
 	}
-	item->flags &= ~STATS_ENTRY_FLAG_REGISTERED;
-	list_del_init(&item->entry); /* Make it not discoverable */
 	item_put_locked(item);
 	pthread_mutex_unlock(&context->global_lock);
 	return 0;
