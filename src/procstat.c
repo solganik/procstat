@@ -700,16 +700,14 @@ static void fuse_read(fuse_req_t req, fuse_ino_t ino, size_t size, off_t off, st
 		return;
 	}
 
-	/*
-	 * An item unregistered via procstat_remove may still be reached here: the item itself has refcnt held from fuse_open.
-	 * If so, the owner may have freed the item stat memory, which is still ok to read.
-	 * HOWEVER, writing to this memory is prohibited and may cause memory corruption.
-	 * Write is possible only for series (see is_reset() and clear_values_...).
-	 * The item itself may not be marked as unregistered (refcnt != 0 in item_put_locked),
-	 * but since series are removed by directory we can rely on parent being marked as unregistered by procstat_remove().
-	 */
-	if (!file->fmt || !file->base.parent || !item_registered(&file->base.parent->base)) {
-		fuse_reply_buf(req, NULL, 0);
+
+	if (!item_registered(&file->base)) {
+		fuse_reply_err(req, ENOENT);
+		return;
+	}
+
+	if (!file->fmt) {
+		fuse_reply_err(req, EPERM);
 		return;
 	}
 
@@ -822,13 +820,12 @@ static void item_put_locked(struct procstat_item *item)
 {
 	assert(item->refcnt);
 
-	if (--item->refcnt)
-		return;
-
 	item->flags &= ~STATS_ENTRY_FLAG_REGISTERED;
 	if (item_type_directory(item))
 		item_put_children_locked((struct procstat_directory *)item);
 
+	if (--item->refcnt)
+		return;
 	free_item(item);
 }
 
