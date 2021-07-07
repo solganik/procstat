@@ -2,7 +2,6 @@
 
 
 #include <string>
-#include <memory>
 #include <system_error>
 #include <thread>
 #include <sstream>
@@ -27,9 +26,7 @@ namespace procstat {
 		return os.tellp();
 	}
 
-	class series;
-
-	class histogram;
+	class directory;
 
 	/**
 	 * @brief the purpose of this class is to "hold" procstat objects registered and alive.
@@ -109,6 +106,8 @@ namespace procstat {
 
 		series() = default;
 
+		inline series(const directory &parent, const std::string &name);
+
 		series(struct procstat_item *parent, const std::string &name) : impl{}
 		{
 			auto *ctx = procstat_context(parent);
@@ -148,6 +147,8 @@ namespace procstat {
 		histogram(const histogram &other) = delete;
 
 		histogram(const histogram &&other) = delete;
+
+		inline histogram(const directory& parent, const std::string &name, std::initializer_list<float> percentiles);
 
 		histogram(struct procstat_item *parent, const std::string &name, std::initializer_list<float> percentiles)
 				: impl{}
@@ -205,7 +206,7 @@ namespace procstat {
 
 		directory(directory &&other) = default;
 
-		directory create_directory(const std::string &name)
+		directory create_directory(const std::string &name) const
 		{
 			auto *item = procstat_create_directory(procstat_context(impl), impl, name.c_str());
 			if (!item) {
@@ -215,7 +216,7 @@ namespace procstat {
 		}
 
 		template<typename T>
-		void create(const std::string &name, T &parameter)
+		void create(const std::string &name, T &parameter) const
 		{
 			procstat_simple_handle handle{name.c_str(),
 										  &parameter,
@@ -231,7 +232,7 @@ namespace procstat {
 
 
 		template<typename T>
-		registration create_start_end(const std::string &name, std::pair<T, T> &start_end)
+		registration create_start_end(const std::string &name, std::pair<T, T> &start_end) const
 		{
 			auto *ctx = procstat_context(impl);
 			procstat_start_end_handle handle{name.c_str(),
@@ -252,19 +253,18 @@ namespace procstat {
 			return registration(ctx, item);
 		}
 
-		std::unique_ptr<series> create_series(const std::string &name)
+		series *create_series(const std::string &name) const
 		{
-			return std::make_unique<series>(impl, name);
+			return new series(impl, name);
 		}
 
 
-		std::unique_ptr<histogram>
-		create_histogram(const std::string &name, std::initializer_list<float> percentiles)
+		histogram *create_histogram(const std::string &name, std::initializer_list<float> percentiles) const
 		{
-			return std::make_unique<histogram>(impl, name, percentiles);
+			return new histogram(impl, name, percentiles);
 		}
 
-		void delete_child(const std::string &name)
+		void delete_child(const std::string &name) const
 		{
 			procstat_remove_by_name(procstat_context(impl), impl, name.c_str());
 		}
@@ -273,6 +273,8 @@ namespace procstat {
 		friend class context;
 
 		friend class series;
+
+		friend class histogram;
 
 		directory(struct procstat_item *item) : impl(item) { ; }
 
@@ -345,4 +347,11 @@ namespace procstat {
 		struct procstat_context *impl;
 		std::thread fuse_thread;
 	};
+
+
+	histogram::histogram(const directory &parent, const std::string &name, std::initializer_list<float> percentiles)
+			: histogram(parent.impl, name, percentiles) {}
+
+
+	series::series(const directory &parent, const std::string &name) : series(parent.impl, name) {};
 }

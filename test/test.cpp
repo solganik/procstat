@@ -147,7 +147,7 @@ TEST(procstat, test_series_count)
 	auto series_path = mount_name() + "/series1";
 	procstat::context ctx(mount_name());
 
-	std::unique_ptr<procstat::series> series1 = ctx.root().create_series("series1");
+	std::unique_ptr<procstat::series> series1 = std::unique_ptr<procstat::series>(ctx.root().create_series("series1"));
 	auto values = read_series(series_path);
 	EXPECT_EQ(values["sum"], 0);
 	EXPECT_EQ(values["count"], 0);
@@ -194,7 +194,7 @@ TEST(procstat, test_series_release_via_dir)
 		procstat::context ctx(mount_name());
 		{
 			auto dir = ctx.root().create_directory("dir");
-			std::unique_ptr<procstat::series> series = dir.create_series("series");
+			auto series = std::make_unique<procstat::series>(dir, "series");
 			ASSERT_TRUE(boost::filesystem::exists(mount_name() + "/dir/series"));
 
 			GTEST_COUT << "Now delete the series via root dir" << endl;
@@ -215,7 +215,7 @@ TEST(procstat, test_procstat_histogram)
 	auto series_path = mount_name() + "/histo1";
 	procstat::context ctx(mount_name());
 
-	std::unique_ptr<procstat::histogram> hist = ctx.root().create_histogram("histo1", {0.5, 0.99, 0.9999});
+	auto hist = std::make_unique<procstat::histogram>(ctx.root(), "histo1", std::initializer_list<float>({0.5, 0.99, 0.9999}));
 
 	auto values = read_histogram(series_path, {"50", "99", "99.99"});
 	EXPECT_EQ(values["sum"], 0);
@@ -249,7 +249,7 @@ TEST(procstat, test_procstat_histogram_reset)
 	auto series_path = mount_name() + "/histo1";
 	procstat::context ctx(mount_name());
 
-	std::unique_ptr<procstat::histogram> hist = ctx.root().create_histogram("histo1", {0.5, 0.99, 0.9999});
+	auto hist = std::make_unique<procstat::histogram>(ctx.root(), "histo1", std::initializer_list<float>({0.5, 0.99, 0.9999}));
 	// Now run and fill the values
 	for (int i = 0; i < 100; ++i) {
 		hist->add_point(i);
