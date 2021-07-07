@@ -8,6 +8,7 @@
 #include <sstream>
 #include <iostream>
 #include <fstream>
+#include <vector>
 #include "procstat.h"
 
 struct procstat_context;
