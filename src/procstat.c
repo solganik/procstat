@@ -37,7 +37,6 @@
 #include <dirent.h>
 #include <stdbool.h>
 #include <errno.h>
-#include "procstat.h"
 #include "list.h"
 #include <errno.h>
 #include <limits.h>
@@ -50,6 +49,8 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <time.h>
+#include "procstat.h"
+#include "basic_formatters.h"
 
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof(*a))
