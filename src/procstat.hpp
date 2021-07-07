@@ -216,23 +216,33 @@ namespace procstat {
 		}
 
 		template<typename T>
-		void create(const std::string &name, T &parameter) const
+		registration create(const std::string &name, T &parameter, bool detach=true) const
 		{
+			auto *ctx = procstat_context(impl);
 			procstat_simple_handle handle{name.c_str(),
 										  &parameter,
 										  0,
 										  formatter<T>,
 										  nullptr};
 
-			int error = procstat_create_simple(procstat_context(impl), impl, &handle, 1);
+			int error = procstat_create_simple(ctx, impl, &handle, 1);
 			if (error != 0) {
 				throw std::system_error(errno, std::generic_category(), name);
 			}
+
+			if (detach) {
+				return registration();
+			}
+			auto item = procstat_lookup_item(ctx, impl, name.c_str());
+			if (!item) {
+				throw std::system_error(errno, std::generic_category(), name);
+			}
+			return registration(ctx, item);
 		}
 
 
 		template<typename T>
-		registration create_start_end(const std::string &name, std::pair<T, T> &start_end) const
+		registration create_start_end(const std::string &name, std::pair<T, T> &start_end, bool detach=true) const
 		{
 			auto *ctx = procstat_context(impl);
 			procstat_start_end_handle handle{name.c_str(),
@@ -244,6 +254,9 @@ namespace procstat {
 				throw std::system_error(errno, std::generic_category(), name);
 			}
 
+			if (detach) {
+				return registration();
+			}
 			auto item = procstat_lookup_item(ctx, impl, name.c_str());
 			if (!item) {
 				throw std::system_error(errno, std::generic_category(), name);

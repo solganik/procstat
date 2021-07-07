@@ -72,11 +72,32 @@ TEST(procstat, test_simple_value_read)
 }
 
 
+TEST(procstat, test_simple_value_register_detached)
+{
+	procstat::context ctx(mount_name());
+	float f = 3.14;
+	{
+		auto registration = ctx.root().create("float", f, true);
+		EXPECT_FLOAT_EQ(f, read_stat_file<float>(mount_name() + "/float"));
+	}
+
+	// registration is out of scope already .. but we still should be able to access
+	f = 2.71;
+	EXPECT_FLOAT_EQ(f, read_stat_file<float>(mount_name() + "/float"));
+
+	// now remove
+	ctx.root().delete_child("float");
+
+	// should not be acessible anymore
+	ASSERT_FALSE(boost::filesystem::exists(mount_name() + "/float"));
+}
+
+
 TEST(procstat, test_start_end)
 {
 	procstat::context ctx(mount_name());
 	std::pair<int, int> p;
-	auto registration = ctx.root().create_start_end("start-1", p);
+	auto registration = ctx.root().create_start_end("start-1", p, false);
 	EXPECT_EQ(0, read_stat_file<int>(mount_name() + "/start-1/start"));
 	EXPECT_EQ(0, read_stat_file<int>(mount_name() + "/start-1/end"));
 
@@ -88,12 +109,38 @@ TEST(procstat, test_start_end)
 }
 
 
+
+TEST(procstat, test_start_end_detached)
+{
+	procstat::context ctx(mount_name());
+	std::pair<int, int> p;
+	{
+		auto registration = ctx.root().create_start_end("start-1", p, true);
+		EXPECT_EQ(0, read_stat_file<int>(mount_name() + "/start-1/start"));
+		EXPECT_EQ(0, read_stat_file<int>(mount_name() + "/start-1/end"));
+	}
+
+	// registration is out of scope already .. but we still should be able to access
+	p.first = 1;
+	p.second = 2;
+	EXPECT_EQ(1, read_stat_file<int>(mount_name() + "/start-1/start"));
+	EXPECT_EQ(2, read_stat_file<int>(mount_name() + "/start-1/end"));
+
+	// now remove
+	ctx.root().delete_child("start-1");
+
+
+	// should not be acessible anymore
+	ASSERT_FALSE(boost::filesystem::exists(mount_name() + "/start-1"));
+}
+
+
 TEST(procstat, test_start_end_destruct_via_registration)
 {
 	procstat::context ctx(mount_name());
 	std::pair<int, int> p{1,2};
 	{
-		auto registration = ctx.root().create_start_end("start-1", p);
+		auto registration = ctx.root().create_start_end("start-1", p, false);
 		EXPECT_EQ(1, read_stat_file<int>(mount_name() + "/start-1/start"));
 		EXPECT_EQ(2, read_stat_file<int>(mount_name() + "/start-1/end"));
 	}
@@ -108,7 +155,7 @@ TEST(procstat, test_start_end_registration_detach)
 	procstat::context ctx(mount_name());
 	std::pair<int, int> p{1,2};
 	{
-		auto registration = ctx.root().create_start_end("start-1", p);
+		auto registration = ctx.root().create_start_end("start-1", p, false);
 		EXPECT_EQ(1, read_stat_file<int>(mount_name() + "/start-1/start"));
 		EXPECT_EQ(2, read_stat_file<int>(mount_name() + "/start-1/end"));
 		registration.detatch();
@@ -126,7 +173,7 @@ TEST(procstat, test_start_end_registration_detach_manual_unregistry)
 	procstat::context ctx(mount_name());
 	std::pair<int, int> p{1,2};
 	{
-		auto registration = ctx.root().create_start_end("start-1", p);
+		auto registration = ctx.root().create_start_end("start-1", p, false);
 		EXPECT_EQ(1, read_stat_file<int>(mount_name() + "/start-1/start"));
 		EXPECT_EQ(2, read_stat_file<int>(mount_name() + "/start-1/end"));
 		registration.detatch();
