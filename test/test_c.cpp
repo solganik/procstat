@@ -529,3 +529,107 @@ TEST_F (ProcstatTest, test_delete_via_root_dir_after_open)
 	ASSERT_EQ(-1, read_try.peek());
 }
 
+TEST_F (ProcstatTest, test_remove_subtree)
+{
+	int value = 10;
+	auto *root = procstat_create_directory(context, NULL, "root");
+	ASSERT_TRUE(root != nullptr);
+	ASSERT_TRUE(boost::filesystem::exists(mount_name() + "/root"));
+
+	for (int i = 0; i < 10; ++i)
+	{
+		string outer_name = string("outer-") + std::to_string(i);
+		auto *outer = procstat_create_directory(context, root, outer_name.c_str());
+		ASSERT_TRUE(outer != nullptr);
+		for (int j = 0; j < 10; ++j)
+		{
+			string inner_name = string("inner-") + std::to_string(j);
+			auto *inner = procstat_create_directory(context, outer, inner_name.c_str());
+			ASSERT_TRUE(inner != nullptr) << "Failed on i=" << i << " j=" << j << " directory name " << inner_name;
+			for (int k = 0; k < 10; ++k)
+			{
+				auto param_name  = string("value-") + std::to_string(k);
+				auto error = procstat_create_int_parameter(context, inner, param_name.c_str(), &value);
+				ASSERT_TRUE(!error);
+			}
+		}
+	}
+
+	// Verify all exists
+	for (int i = 0; i < 10; ++i) {
+		for (int j = 0; j < 10; ++j) {
+			for (int k = 0; k < 10; ++k)
+			{
+				auto path = boost::format("/root/outer-%1%/inner-%2%/value-%3%") % i % j % k;
+				ASSERT_EQ(10, read_stat_file<int>(mount_name() + path.str().c_str()));
+			}
+		}
+	}
+
+	auto *dir_to_remove = procstat_lookup_item(context, root, "outer-0");
+	ASSERT_TRUE(dir_to_remove != nullptr);
+	procstat_remove_subtree(context, dir_to_remove);
+	procstat_refput(context, dir_to_remove);
+	ASSERT_TRUE(boost::filesystem::exists(mount_name() + "/root/outer-0"));
+
+	//Verify that nothering under outer-0 exists
+	for (int j = 0; j < 10; ++j) {
+		for (int k = 0; k < 10; ++k)
+		{
+			auto path = boost::format("/root/outer-0/inner-%1%/value-%2%")  % j % k;
+			ASSERT_FALSE(boost::filesystem::exists(mount_name() + path.str()));
+		}
+	}
+
+	// Verify all other exists
+	for (int i = 1; i < 10; ++i) {
+		for (int j = 0; j < 10; ++j) {
+			for (int k = 0; k < 10; ++k)
+			{
+				auto path = boost::format("/root/outer-%1%/inner-%2%/value-%3%") % i % j % k;
+				ASSERT_EQ(10, read_stat_file<int>(mount_name() + path.str().c_str()));
+			}
+		}
+	}
+
+
+	auto *outer_dir = procstat_lookup_item(context, root, "outer-1");
+	ASSERT_TRUE(outer_dir != nullptr);
+	dir_to_remove = procstat_lookup_item(context, outer_dir, "inner-0");
+	ASSERT_TRUE(dir_to_remove != nullptr);
+	procstat_remove_subtree(context, dir_to_remove);
+	ASSERT_TRUE(boost::filesystem::exists(mount_name() + "/root/outer-1/inner-0"));
+
+
+	// Verify no stats under /root/outer-1/inner-0
+	for (int k = 0; k < 10; ++k)
+	{
+		auto path = boost::format("/root/outer-1/inner-0/value-%1%") % k;
+		ASSERT_FALSE(boost::filesystem::exists(mount_name() + path.str()));
+	}
+
+
+	// verify all others under outer-1 exists
+	for (int j = 1; j < 10; ++j) {
+		for (int k = 0; k < 10; ++k)
+		{
+			auto path = boost::format("/root/outer-1/inner-%1%/value-%2%")  % j % k;
+			ASSERT_EQ(10, read_stat_file<int>(mount_name() + path.str().c_str()));
+		}
+	}
+
+
+	// remove root
+	procstat_remove_subtree(context, root);
+	ASSERT_TRUE(boost::filesystem::exists(mount_name() + "/root"));
+
+	for (int i = 1; i < 10; ++i) {
+		for (int j = 0; j < 10; ++j) {
+			for (int k = 0; k < 10; ++k)
+			{
+				auto path = boost::format("/root/outer-%1%/inner-%2%/param-%3%") % i % j % k;
+				ASSERT_FALSE(boost::filesystem::exists(mount_name() + path.str()));
+			}
+		}
+	}
+}

@@ -134,6 +134,15 @@ void procstat_remove(struct procstat_context *context, struct procstat_item *ite
  */
 int procstat_remove_by_name(struct procstat_context *context, struct procstat_item *parent, const char *name);
 
+/**
+ * @brief removes subtree of @directory. Note that @directory item should be created
+ * via @procstat_create_directory. This method does not remove the directory itself, but only
+ * items inside the directory (recursively)
+ * @context statistics context
+ * @directory to clean
+ */
+void procstat_remove_subtree(struct procstat_context *context, struct procstat_item* directory);
+
 /*
  * @brief return an item with @name under @parent directory
  * @context statistics context

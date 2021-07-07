@@ -299,6 +299,11 @@ namespace procstat {
 			procstat_remove_by_name(procstat_context(impl), impl, name.c_str());
 		}
 
+		void delete_subtree() const
+		{
+			procstat_remove_subtree(procstat_context(impl), impl);
+		}
+
 	private:
 		friend class context;
 
