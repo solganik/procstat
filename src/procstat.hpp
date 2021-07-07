@@ -41,6 +41,8 @@ namespace procstat {
 		friend class directory;
 
 	public:
+		registration() : impl{}, ctx{} {}
+
 		registration(const registration &other)
 		{
 			impl = other.impl;
@@ -54,6 +56,23 @@ namespace procstat {
 			ctx = other.ctx;
 			other.impl = nullptr;
 			other.ctx = nullptr;
+		}
+
+		registration& operator=(const registration& other)
+		{
+			impl = other.impl;
+			ctx = other.ctx;
+			procstat_refget(ctx, impl);
+			return *this;
+		}
+
+		registration& operator=(registration&& other)
+		{
+			impl = other.impl;
+			ctx = other.ctx;
+			other.impl = nullptr;
+			other.ctx = nullptr;
+			return *this;
 		}
 
 		void detatch()
@@ -74,8 +93,6 @@ namespace procstat {
 		}
 
 	private:
-		registration() : impl{}, ctx{} { ; }
-
 		registration(struct procstat_context *ctx, procstat_item *impl) : ctx(ctx), impl(impl) {}
 
 		void attach(struct procstat_context *ctx, procstat_item *impl)
