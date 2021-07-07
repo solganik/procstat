@@ -1781,3 +1781,11 @@ void procstat_refput(struct procstat_context *context, struct procstat_item *ite
 		--item->refcnt;
 	pthread_mutex_unlock(&context->global_lock);
 }
+
+void procstat_remove_subtree(struct procstat_context *context, struct procstat_item* directory)
+{
+	pthread_mutex_lock(&context->global_lock);
+	if (item_type_directory(directory))
+		item_put_children_locked((struct procstat_directory*)directory);
+	pthread_mutex_unlock(&context->global_lock);
+}
